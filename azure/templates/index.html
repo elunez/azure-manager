@@ -7,10 +7,10 @@
         <li>{{ Credential.id }} - {{ Credential.account }}
             <span class="float-right">
                 <form class="inline-form" method="post" action="{{ url_for('list', credential_id=Credential.id)}}">
-                    <input class="go" type="submit" name="delete" value="Manage">
+                    <input class="go" type="submit" name="delete" value="管理">
                 </form>
                 <form class="inline-form" method="post" action="{{ url_for('account_delete', credential_id=Credential.id)}}">
-                    <input class="go" type="submit" name="delete" value="Delete" onclick="return confirm('Are you sure?')">
+                    <input class="go" type="submit" name="delete" value="删除" onclick="return confirm('Are you sure?')">
                 </form>
             </span>
         </li>
