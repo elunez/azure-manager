@@ -123,4 +123,5 @@ nav li a:hover {
     text-decoration: none;
     background: #F5C518;
     border-radius: 5px;
+    cursor: pointer;
 }

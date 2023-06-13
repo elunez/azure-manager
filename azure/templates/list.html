@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
-    <p>账户 {{ account }} 管理中 <a class="go" href="/account/{{ id }}/vm/create" title="GO!">新增</a></p>
+    <p>账户 {{ account }} 管理中 <a class="go" style="padding: 3px 5px;" href="/account/{{ id }}/vm/create" title="GO!">新增</a></p>
     <p>VM信息不自动更新，请手动刷新浏览器页面</p>
     <ul  class="list">
         {% for ip, tag in dict["ip"]|zip(dict["tag"]) %}
