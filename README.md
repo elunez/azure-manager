@@ -10,7 +10,16 @@
 docker run -itd --name az \
 --restart always \
 -p 8888:8888 \
-dqjdda/azure-manager
+dqjdda/azure-manager:latest
+```
+
+**ARM机器用户请使用** 
+
+```bash
+docker run -itd --name az \
+--restart always \
+-p 8888:8888 \
+dqjdda/azure-manager:arm
 ```
 
 ## 重置管理密码
