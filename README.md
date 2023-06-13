@@ -6,10 +6,6 @@
 
 安装教程：https://www.ydyno.com/archives/1404.html
 
-### 安装依赖包
-
-pip3 install -r requirements.txt
-
 ### 默认VM账号密码
 
 账号 : defaultuser
