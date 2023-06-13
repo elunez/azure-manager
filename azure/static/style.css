@@ -116,11 +116,11 @@ nav li a:hover {
 }
 
 .go {
+    margin-top: -5px;
     font-size: 12px;
     font-weight: bold;
     color: black;
     text-decoration: none;
     background: #F5C518;
     border-radius: 5px;
-    padding: 3px 5px;
 }
