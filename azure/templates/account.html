@@ -4,10 +4,7 @@
     <p>{{ Credentials|length }} Accounts</p>
     <form method="post">
          <p>邮箱 <input type="text" name="account" autocomplete="off" required></p>
-         <p>名称 <input type="text" name="client_id" autocomplete="off" required></p>
-         <p>密码 <input type="text" name="client_secret" autocomplete="off" required></p>
-         <p>租户 <input type="text" name="tenant_id" autocomplete="off" required></p>
-         <p>订阅 <input type="text" name="subscription_id" autocomplete="off" required></p>
-    <input class="btn" type="submit" name="submit" value="添加">
+         <p>密码 <input type="text" name="string" placeholder="appId|password|tenant|subs" autocomplete="off" required></p>
+    <input class="btn" type="submit" name="submit" value="Add">
     </form>
 {% endblock %}

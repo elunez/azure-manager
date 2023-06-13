@@ -113,7 +113,6 @@ nav li a:hover {
 
 .float-right {
     float: right;
-    margin-top: -5px;
 }
 
 .go {
@@ -124,12 +123,4 @@ nav li a:hover {
     background: #F5C518;
     border-radius: 5px;
     padding: 3px 5px;
-}
-
-input[type=submit] {
-    cursor: pointer;
-}
-
-a {
-    cursor: pointer;
 }

@@ -143,10 +143,10 @@ def account_add():
             flash('You need login')
             return redirect(url_for('login'))
         account = request.form.get('account')
-        client_id = request.form.get('client_id')
-        client_secret = request.form.get('client_secret')
-        tenant_id = request.form.get('tenant_id')
-        subscription_id = request.form.get('subscription_id')
+        client_id = request.form.get('string').split("|")[0]
+        client_secret = request.form.get('string').split("|")[1]
+        tenant_id = request.form.get('string').split("|")[2]
+        subscription_id = request.form.get('string').split("|")[3]
         if not account or not client_id or not client_secret or not tenant_id or not subscription_id:
             flash('Incorrect input')
             return redirect(url_for('index'))
@@ -193,14 +193,15 @@ def create_vm(credential_id):
         custom = request.form.get('custom')
         acc = request.form.get('acc')
         disk = request.form.get('disk')
+        spot = request.form.get('spot')
         username = "defaultuser"
         password = "Thisis.yourpassword1"
         credential = function.create_credential_object(tenant_id, client_id, client_secret)
         for i in range(int(set)):
-            name = (tag + str(i + 1))
+            name = (tag + "-" + str(i + 1))
             function.create_resource_group(subscription_id, credential, name, location)
             threading.Thread(target=function.create_or_update_vm, args=(
-            subscription_id, credential, name, location, username, password, size, os, custom, acc, disk)).start()
+            subscription_id, credential, name, location, username, password, size, os, custom, acc, disk, spot)).start()
         flash('Creating VM, Be patient')
     info = Credential.query.all()
     credential = Credential.query.get_or_404(credential_id)

@@ -19,11 +19,13 @@
     <nav>
         <ul>
             <li><a href="{{ url_for('index') }}">主页</a></li>
-            <li><a href="{{ url_for('account_add') }}">增加管理账户</a></li>  
+            <li><a href="{{ url_for('account_add') }}">增加管理账户</a></li>
+        </ul>
     </nav>
     {% block content %}{% endblock %}
     <footer>
-        <small>&copy; 2021 Powered by 1injex</small>
+        <small>&copy; 2023 Powered by <a style="text-decoration:none;
+color:#888;" href="https://github.com/elunez/azure-manager">elunez/azure-manager</a></small>
     </footer>
 </body>
 </html>
