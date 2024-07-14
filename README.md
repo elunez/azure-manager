@@ -40,9 +40,9 @@ docker exec -it az flask admin 用户名 密码
 
 ### 增加管理账户
 
-提取API参数：https://www.ydyno.com/archives/1394.html
+提取API参数教程：https://www.ydyno.com/archives/1394.html
 
-**将以下命令输入到 Azure cloud shell（使用 Bash）**
+**或者将以下命令输入到 Azure cloud shell（使用 Bash）**
 
 ```bash
 sub_id=$(az account list --query [].id -o tsv) && az ad sp create-for-rbac --role contributor --scopes /subscriptions/$sub_id
