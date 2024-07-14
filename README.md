@@ -4,6 +4,11 @@
 
 原版：https://github.com/1injex/azure-manager
 
+## 预览图片
+<img width="631" alt="image" src="https://github.com/user-attachments/assets/87ad8994-6caf-472d-8039-483c1c5d3f8b">
+<img width="644" alt="image" src="https://github.com/user-attachments/assets/1e67af5d-e868-4907-b3f9-7c617a1f2a58">
+<img width="668" alt="image" src="https://github.com/user-attachments/assets/3ce54dc8-9069-4f97-9454-80233a606f5f">
+
 ## 使用方法
 
 ```bash
