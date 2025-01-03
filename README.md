@@ -27,6 +27,12 @@ docker run -itd --name az \
 dqjdda/azure-manager:arm
 ```
 
+## 挂载数据库文件
+
+```bash
+-v /path/to/your:/root/azure
+```
+
 ## 重置管理密码
 
 ```bash
