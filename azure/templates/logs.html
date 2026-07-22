@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <p>任务日志（最近 200 条）</p>
+    <ul class="list">
+        {% for log in logs %}
+        <li>
+            {{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
+            | {{ log.status }}
+            | {{ log.account }}
+            | {{ log.action }}
+            | {{ log.target }}
+            {% if log.detail %}<br>{{ log.detail }}{% endif %}
+        </li>
+        {% else %}
+        <li>暂无任务日志</li>
+        {% endfor %}
+    </ul>
+{% endblock %}
