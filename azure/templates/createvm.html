@@ -1,78 +1,98 @@
 {% extends 'base.html' %}
 
+{% block title %}创建 VM - Azure Manager{% endblock %}
+
 {% block content %}
-    <p>{{ account }} 管理中</p>
-    <form method="post">
-      <div>
-          <p><label>标签(英文数字组合) <input type="text" name="tag" autocomplete="off" required></label></p>
-        <p><label>区域 <select name="location" required>
-            <option value="eastasia">香港</option>
-            <option value="southeastasia">新加坡</option>
-            <option value="japanwest">日本大阪</option>
-            <option value="japaneast">日本东京</option>
-            <option value="koreacentral">韩国中部</option>
-            <option value="koreasouth">韩国南部</option>
-            <option value="northcentralus">美国中北部</option>
-            <option value="westus2">美国西2</option>
-            <option value="westus3">美国西3</option>
-            <option value="centralus">美国中部</option>
-            <option value="westcentralus">美国中西部</option>
-            <option value="eastus">美国东部</option>
-            <option value="eastus2">美国东部2</option>
-            <option value="southcentralus">美国中南部</option>
-            <option value="australiaeast">澳洲南部</option>
-            <option value="northeurope">欧洲北部</option>
-            <option value="uksouth">英国南部</option>
-            <option value="southafricanorth">南非北部</option>
-            <option value="canadacentral">加拿大中部</option>
-            <option value="francecentral">法国中部</option>
-            <option value="germanywestcentral">德国中西部</option>
-            <option value="norwayeast">挪威东部</option>
-            <option value="switzerlandnorth">瑞典北部</option>
-            <option value="uaenorth">阿联酋北部</option>
-            <option value="qatarcentral">卡塔尔中部</option>
-            <option value="brazilsouth">巴西南部</option>
-            <option value="australiacentral">澳洲中部</option>
-            <option value="australiasoutheast">澳洲东南部</option>
-            <option value="southindia">印度南部</option>
-            <option value="westindia">印度西部</option>
-            <option value="ukwest">英国西部</option>
-            <option value="canadaeast">加拿大东部</option>
-        </select></label></p>
-        <p><label>型号 <select name="size" required>
-            <option value="Standard_B2ats_v2" selected>B2s(2C1G-amd)</option>
-            <option value="Standard_B2pts_v2">B2s(2C1G-arm)</option>
-            <option value="Standard_B1s">B1s(1C1G-amd)</option>
-        </select></label></p>
-        <p><label>数量 <select name="set" required>
-            <option value="1">创建1台</option>
-            <option value="2">创建2台</option>
-            <option value="3">创建3台</option>
-            <option value="4">创建4台</option>
-            <option value="5">创建5台</option>
-        </select></label></p>
-        <p><label>系统 <select name="os" required>
-            <option value="Debian_12_X64">Debian 12 Bookworm x64 Gen2</option>
-            <option value="Debian_12_ARM64">Debian 12 Bookworm ARM64</option>
-            <option value="Ubuntu_24_04_X64">Ubuntu Server 24.04 LTS x64 Gen2</option>
-            <option value="Ubuntu_24_04_ARM64">Ubuntu Server 24.04 LTS ARM64 Gen2</option>
-            <option value="WinData_2022">WinData_2022</option>
-        </select></label></p>
-        <p><label>硬盘大小 <select name="disk" required>
-            <option value="64">64 GB</option>
-	        <option value="128">128 GB</option>
-            <option value="256">256 GB</option>
-        </select></label></p>
-        <p>自定义脚本(请使用Base64预编码) <input type="text" name="custom" autocomplete="off"></p>
-        <p><label>ACC(仅F4S机型可开启)<select name="acc" required>
-            <option value="False">默认不开启</option>
-            <option value="True">开启</option>
-        </select></label></p>
-        <p><label>Spot实例<select name="spot" required>
-            <option value="False">默认不开启</option>
-            <option value="True">开启</option>
-        </select></label></p>
-    <input class="btn" type="submit" name="submit" value="添加">
-      </div>
-    </form>
+<div class="app-page-header mb-4">
+    <div>
+        <h1 class="app-page-title">创建 VM</h1>
+        <p class="app-page-subtitle">{{ credential.account }}</p>
+    </div>
+    <a class="btn btn-light border app-primary-action" href="{{ url_for('vm_list', credential_id=credential.id) }}">
+        <i class="bi bi-arrow-left" aria-hidden="true"></i>
+        返回 VM 列表
+    </a>
+</div>
+
+{% if errors %}
+<div class="alert alert-danger d-flex align-items-start gap-2 form-surface" role="alert">
+    <i class="bi bi-exclamation-circle flex-shrink-0" aria-hidden="true"></i>
+    <div>{% for error in errors %}<div>{{ error }}</div>{% endfor %}</div>
+</div>
+{% endif %}
+
+<form method="post" class="form-surface">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label" for="vm-name">名称</label>
+            <input class="form-control" id="vm-name" type="text" name="tag" value="{{ values.get('tag', '') }}"
+                   maxlength="64" autocomplete="off" required>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="vm-location">区域</label>
+            <select class="form-select" id="vm-location" name="location" required>
+                {% for value, label in locations %}
+                <option value="{{ value }}" {% if values.get('location', 'eastasia') == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="vm-size">机型</label>
+            <select class="form-select" id="vm-size" name="size" required>
+                {% for value, label in sizes %}
+                <option value="{{ value }}" {% if values.get('size', 'Standard_B2ats_v2') == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="vm-count">数量</label>
+            <select class="form-select" id="vm-count" name="count" required>
+                {% for count in range(1, 6) %}
+                <option value="{{ count }}" {% if values.get('count', 1)|int == count %}selected{% endif %}>{{ count }} 台</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-12">
+            <label class="form-label" for="vm-os">系统镜像</label>
+            <select class="form-select" id="vm-os" name="os" required>
+                {% for value, image in images.items() %}
+                <option value="{{ value }}" {% if values.get('os', 'Debian_12_X64') == value %}selected{% endif %}>{{ image.display }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="vm-disk">系统磁盘</label>
+            <select class="form-select" id="vm-disk" name="disk" required>
+                {% for disk_size in disk_sizes %}
+                <option value="{{ disk_size }}" {% if values.get('disk', 64)|int == disk_size %}selected{% endif %}>{{ disk_size }} GB</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="vm-acc">加速网络</label>
+            <select class="form-select" id="vm-acc" name="acc" required>
+                <option value="False" {% if values.get('acc', 'False') == 'False' %}selected{% endif %}>关闭</option>
+                <option value="True" {% if values.get('acc') == 'True' %}selected{% endif %}>开启</option>
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="vm-spot">Spot 实例</label>
+            <select class="form-select" id="vm-spot" name="spot" required>
+                <option value="False" {% if values.get('spot', 'False') == 'False' %}selected{% endif %}>关闭</option>
+                <option value="True" {% if values.get('spot') == 'True' %}selected{% endif %}>开启</option>
+            </select>
+        </div>
+        <div class="col-12">
+            <label class="form-label" for="vm-custom">自定义脚本（Base64）</label>
+            <textarea class="form-control font-monospace" id="vm-custom" name="custom" rows="5" spellcheck="false">{{ values.get('custom', '') }}</textarea>
+        </div>
+        <div class="col-12 pt-2">
+            <button class="btn btn-primary" type="submit">
+                <i class="bi bi-play-fill" aria-hidden="true"></i>
+                提交创建任务
+            </button>
+        </div>
+    </div>
+</form>
 {% endblock %}

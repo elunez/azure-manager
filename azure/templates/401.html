@@ -1,12 +1,15 @@
 {% extends 'base.html' %}
 
+{% block title %}未授权访问 - Azure Manager{% endblock %}
+
 {% block content %}
-<ul class="list">
-    <li>
-        Unauthorized - 403
-        <span class="float-right">
-            <a href="{{ url_for('index') }}">Go Back</a>
-        </span>
-    </li>
-</ul>
+<div class="empty-view">
+    <i class="bi bi-shield-lock empty-view-icon" aria-hidden="true"></i>
+    <h1 class="empty-view-title">未授权访问</h1>
+    <p class="empty-view-text">请登录后继续操作</p>
+    <a class="btn btn-primary" href="{{ url_for('login') }}">
+        <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i>
+        前往登录
+    </a>
+</div>
 {% endblock %}

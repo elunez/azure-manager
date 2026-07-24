@@ -1,12 +1,15 @@
 {% extends 'base.html' %}
 
+{% block title %}请求处理失败 - Azure Manager{% endblock %}
+
 {% block content %}
-<ul class="list">
-    <li>
-        Unexpected Error - 500
-        <span class="float-right">
-            <a href="{{ url_for('index') }}">Go Back</a>
-        </span>
-    </li>
-</ul>
+<div class="empty-view">
+    <i class="bi bi-exclamation-triangle empty-view-icon text-danger" aria-hidden="true"></i>
+    <h1 class="empty-view-title">请求处理失败</h1>
+    <p class="empty-view-text">{{ message or '服务器处理请求时发生错误' }}</p>
+    <a class="btn btn-primary" href="{{ url_for('index') }}">
+        <i class="bi bi-arrow-left" aria-hidden="true"></i>
+        返回账号管理
+    </a>
+</div>
 {% endblock %}

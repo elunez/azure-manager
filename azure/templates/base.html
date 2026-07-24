@@ -1,39 +1,106 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-    {% block head %}
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" type="text/css">
-    <script>
-        document.addEventListener('keydown', function (event) {
-            if (event.key === 'F5') {
-                location.reload();
-            }
-        });
-    </script>
-    <title>Azure Manager</title>
-    {% endblock %}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>{% block title %}Azure Manager{% endblock %}</title>
 </head>
 <body>
-    {% for message in get_flashed_messages() %}
-    <div class="alert">{{ message }}</div>
-    {% endfor %}
-    <h2>
-        Azure Manager
-    </h2>
-    <nav>
-        <ul>
-            <li><a href="{{ url_for('index') }}">主页</a></li>
-            <li><a href="{{ url_for('operation_logs') }}">任务日志</a></li>
-            <li><a href="{{ url_for('account_add') }}">增加管理账户</a></li>
-        </ul>
-    </nav>
-    {% block content %}{% endblock %}
-    <footer>
-        <small>&copy; 2023 Powered by <a style="text-decoration:none;
-color:#888;" href="https://github.com/elunez/azure-manager">elunez/azure-manager</a></small>
+<div class="app-page d-flex flex-column min-vh-100">
+    <header class="navbar navbar-expand-md navbar-dark app-navbar">
+        <div class="container app-container">
+            <a class="navbar-brand d-inline-flex align-items-center gap-2" href="{{ url_for('index') if current_user.is_authenticated else url_for('login') }}">
+                <img class="app-brand-logo" src="{{ url_for('static', filename='azure.png') }}" alt="">
+                <span>Azure Manager</span>
+            </a>
+            {% if current_user.is_authenticated %}
+            <button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#main-navbar" aria-controls="main-navbar" aria-expanded="false" aria-label="展开主导航">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="main-navbar">
+                <ul class="navbar-nav ms-auto align-items-md-center">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
+                            <i class="bi bi-people" aria-hidden="true"></i>
+                            <span>账号管理</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'operation_logs' %}active{% endif %}" href="{{ url_for('operation_logs') }}">
+                            <i class="bi bi-list-task" aria-hidden="true"></i>
+                            <span>任务日志</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('logout') }}">
+                            <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
+                            <span>退出</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+    </header>
+
+    <main class="app-main flex-grow-1">
+        <div class="container app-container">
+            <section class="app-shell">
+                {% block content %}{% endblock %}
+            </section>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <div class="container app-container text-body-secondary">
+            <small>&copy; 2026 Azure Manager</small>
+        </div>
     </footer>
+</div>
+
+{% set flash_messages = get_flashed_messages() %}
+{% if flash_messages %}
+<div class="toast-container position-fixed app-toast-container">
+    {% for message in flash_messages %}
+    <div class="toast app-toast" role="status" aria-live="polite" aria-atomic="true" data-bs-delay="4000">
+        <div class="d-flex align-items-center gap-3">
+            <span class="app-toast-icon" aria-hidden="true"><i class="bi bi-check-lg"></i></span>
+            <div class="toast-body flex-grow-1 p-0">{{ message }}</div>
+            <button type="button" class="btn-close app-toast-close" data-bs-dismiss="toast" aria-label="关闭"></button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="modal fade" id="confirm-action-modal" tabindex="-1" aria-labelledby="confirm-action-title" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <form class="modal-content" method="post" id="confirm-action-form">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="confirm-action-title">确认操作</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0 text-body-secondary" id="confirm-action-body"></p>
+                <div id="confirm-action-fields"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light border" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-danger" id="confirm-action-submit">
+                    <i class="bi bi-check-lg" aria-hidden="true"></i>
+                    确认
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

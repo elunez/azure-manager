@@ -1,26 +1,53 @@
 {% extends 'base.html' %}
 
+{% block title %}VM 管理 - Azure Manager{% endblock %}
+
 {% block content %}
-    <p>账户 {{ account }} 管理中<a class="go" style="padding: 3px 5px;margin-left: 3px;" href="/account/{{ id }}/vm/create" title="GO!">新增</a></p>
-    <p>VM信息不自动更新，请手动<a href="javascript:location.reload()" title="GO!" style="color: #0078d4;text-decoration: none;"> 刷新 </a>当前页面</p>
-    <ul  class="list">
-        {% for ip, tag in dict["ip"]|zip(dict["tag"]) %}
-        <li>{{ tag }} - {{ ip }}
-        <span class="float-right">
-            <form class="inline-form" method="post" action="{{ url_for('stop_vm', credential_id=id, tag=tag) }}">
-                 <input class="go" type="submit" name="delete" value="停止" onclick="return confirm('Are you sure?')">
-            </form>
-            <form class="inline-form" method="post" action="{{ url_for('start_vm', credential_id=id, tag=tag) }}">
-                 <input class="go" type="submit" name="delete" value="启动" onclick="return confirm('Are you sure?')">
-            </form>
-            <form class="inline-form" method="post" action="{{ url_for('delete_vm', credential_id=id, tag=tag) }}">
-                 <input class="go" type="submit" name="delete" value="删除" onclick="return confirm('Are you sure?')">
-            </form>
-            <form class="inline-form" method="post" action="{{ url_for('changeip_vm', credential_id=id, tag=tag) }}">
-                 <input class="go" type="submit" name="delete" value="更换IP" onclick="return confirm('Are you sure?')">
-            </form>
-        </span>
-        </li>
-        {% endfor %}
-    </ul>
+<div class="app-page-header mb-4">
+    <div>
+        <h1 class="app-page-title">VM 管理</h1>
+        <p class="app-page-subtitle">{{ credential.account }} · <span id="vm-count">加载中</span></p>
+    </div>
+    <div class="app-actions">
+        <button class="btn btn-sm btn-light border" type="button" id="vm-refresh">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+            刷新
+        </button>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('create_vm', credential_id=credential.id) }}">
+            <i class="bi bi-plus-lg" aria-hidden="true"></i>
+            创建 VM
+        </a>
+    </div>
+</div>
+
+<div class="table-panel vm-table-scroll">
+    <table class="table table-hover align-middle mb-0 vm-table">
+        <colgroup>
+            <col class="vm-name-col">
+            <col class="vm-ip-col">
+            <col class="vm-location-col">
+            <col class="vm-size-col">
+            <col class="vm-status-col">
+            <col class="vm-actions-col">
+        </colgroup>
+        <thead>
+            <tr>
+                <th class="vm-name-column">名称</th>
+                <th class="vm-ip-column">IP 地址</th>
+                <th class="vm-location-column">位置</th>
+                <th class="vm-size-column">规格</th>
+                <th class="vm-status-column">状态</th>
+                <th class="vm-actions-column">操作</th>
+            </tr>
+        </thead>
+        <tbody id="vm-table-body" data-vm-list-url="{{ url_for('vm_list_data', credential_id=credential.id) }}" aria-busy="true">
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                    正在加载 VM...
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
 {% endblock %}

@@ -1,0 +1,67 @@
+{% for vm in vms %}
+<tr>
+    <td class="vm-name-column">
+        <span class="vm-name" title="{{ vm.name }}">{{ vm.name }}</span>
+    </td>
+    <td class="font-monospace vm-ip-column">{{ vm.public_ips|join(', ') or '未分配' }}</td>
+    <td class="vm-location-column">{{ vm.location }}</td>
+    <td class="vm-size-column">{{ vm.size }}</td>
+    <td class="vm-status-column">
+        <span class="badge status-badge vm-status-{{ vm.power_state }}">{{ vm.power_state }}</span>
+        {% if vm.details_error %}<div class="small text-danger mt-1">{{ vm.details_error }}</div>{% endif %}
+    </td>
+    <td class="vm-actions-column">
+        <div class="vm-action-group">
+            <form method="post" action="{{ url_for('start_vm', credential_id=credential.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="resource_group" value="{{ vm.resource_group }}">
+                <input type="hidden" name="vm_name" value="{{ vm.name }}">
+                <button class="btn btn-sm btn-success vm-action-button" type="submit"
+                        title="启动 {{ vm.name }}" aria-label="启动 {{ vm.name }}">
+                    <i class="bi bi-play-fill" aria-hidden="true"></i>
+                    <span class="vm-action-label">启动</span>
+                </button>
+            </form>
+            <form method="post" action="{{ url_for('stop_vm', credential_id=credential.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="resource_group" value="{{ vm.resource_group }}">
+                <input type="hidden" name="vm_name" value="{{ vm.name }}">
+                <button class="btn btn-sm btn-secondary vm-action-button" type="submit"
+                        title="停止 {{ vm.name }}" aria-label="停止 {{ vm.name }}">
+                    <i class="bi bi-stop-fill" aria-hidden="true"></i>
+                    <span class="vm-action-label">停止</span>
+                </button>
+            </form>
+            <form method="post" action="{{ url_for('changeip_vm', credential_id=credential.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="resource_group" value="{{ vm.resource_group }}">
+                <input type="hidden" name="vm_name" value="{{ vm.name }}">
+                <button class="btn btn-sm btn-info vm-action-button" type="button"
+                        data-bs-toggle="modal" data-bs-target="#confirm-action-modal"
+                        data-confirm-title="更换公网 IP"
+                        data-confirm-body="确定更换 {{ vm.name }} 的公网 IP？"
+                        data-confirm-class="btn-info"
+                        title="更换 {{ vm.name }} 的公网 IP" aria-label="更换 {{ vm.name }} 的公网 IP">
+                    <i class="bi bi-globe2" aria-hidden="true"></i>
+                    <span class="vm-action-label">更换 IP</span>
+                </button>
+            </form>
+            <form method="post" action="{{ url_for('delete_vm', credential_id=credential.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="resource_group" value="{{ vm.resource_group }}">
+                <input type="hidden" name="vm_name" value="{{ vm.name }}">
+                <button class="btn btn-sm btn-danger vm-action-button" type="button"
+                        data-bs-toggle="modal" data-bs-target="#confirm-action-modal"
+                        data-confirm-title="删除资源组"
+                        data-confirm-body="将删除整个资源组 {{ vm.resource_group }} 及其中全部资源，确定继续？"
+                        title="删除 {{ vm.name }} 所在资源组" aria-label="删除 {{ vm.name }} 所在资源组">
+                    <i class="bi bi-trash3" aria-hidden="true"></i>
+                    <span class="vm-action-label">删除</span>
+                </button>
+            </form>
+        </div>
+    </td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="empty-state">当前订阅没有 VM</td></tr>
+{% endfor %}

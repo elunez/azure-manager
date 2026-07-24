@@ -1,12 +1,14 @@
 {% extends 'base.html' %}
 
+{% block title %}页面不存在 - Azure Manager{% endblock %}
+
 {% block content %}
-<ul class="list">
-    <li>
-        Page Not Found - 404
-        <span class="float-right">
-            <a href="{{ url_for('index') }}">Go Back</a>
-        </span>
-    </li>
-</ul>
+<div class="empty-view">
+    <i class="bi bi-file-earmark-x empty-view-icon" aria-hidden="true"></i>
+    <h1 class="empty-view-title">页面不存在</h1>
+    <a class="btn btn-primary" href="{{ url_for('index') }}">
+        <i class="bi bi-arrow-left" aria-hidden="true"></i>
+        返回账号管理
+    </a>
+</div>
 {% endblock %}

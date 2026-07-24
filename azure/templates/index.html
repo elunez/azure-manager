@@ -1,19 +1,183 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<p>{{ Credentials|length }} 账号管理数</p>
-    <ul class="list">
-        {% for Credential in Credentials %}
-        <li>{{ Credential.id }} - {{ Credential.account }}
-            <span class="float-right">
-                <form class="inline-form" method="post" action="{{ url_for('list', credential_id=Credential.id)}}">
-                    <input class="go" type="submit" name="delete" value="管理">
-                </form>
-                <form class="inline-form" method="post" action="{{ url_for('account_delete', credential_id=Credential.id)}}">
-                    <input class="go" type="submit" name="delete" value="删除" onclick="return confirm('Are you sure?')">
-                </form>
-            </span>
-        </li>
-        {% endfor %}
-    </ul>
+{% set modal_values = account_modal['values'] if account_modal else {} %}
+{% set edit_mode = account_modal and account_modal.mode == 'edit' %}
+
+<div class="app-page-header mb-4">
+    <div>
+        <h1 class="app-page-title">账号管理</h1>
+        <p class="app-page-subtitle">管理 Azure 服务主体和订阅访问</p>
+    </div>
+    <a class="btn btn-sm btn-primary app-primary-action" href="{{ url_for('index', modal='add', page=pagination.page, per_page=selected_page_size) }}"
+       data-bs-toggle="modal" data-bs-target="#account-modal"
+       data-account-mode="add" data-action="{{ url_for('account_add') }}" data-page="{{ pagination.page }}"
+       data-page-size="{{ selected_page_size }}">
+        <i class="bi bi-person-plus" aria-hidden="true"></i>
+        添加账号
+    </a>
+</div>
+
+<div class="table-panel table-responsive account-table">
+    <table class="table table-hover align-middle mb-0">
+        <thead>
+            <tr>
+                <th>账号</th>
+                <th>订阅 ID</th>
+                <th class="text-nowrap">更新时间</th>
+                <th class="actions-column">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for credential in pagination.items %}
+            <tr>
+                <td>{{ credential.account }}</td>
+                <td><code class="text-body">{{ credential.subscription_id }}</code></td>
+                <td class="text-body-secondary text-nowrap">{{ credential.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td class="actions-column">
+                    <div class="action-group">
+                        <a class="btn btn-sm btn-light border" href="{{ url_for('vm_list', credential_id=credential.id) }}">
+                            <i class="bi bi-server" aria-hidden="true"></i>
+                            管理 VM
+                        </a>
+                        <a class="btn btn-sm btn-light border" href="{{ url_for('index', modal='edit', credential_id=credential.id, page=pagination.page, per_page=selected_page_size) }}"
+                           data-bs-toggle="modal" data-bs-target="#account-modal"
+                           data-account-mode="edit" data-action="{{ url_for('account_edit', credential_id=credential.id) }}"
+                           data-page="{{ pagination.page }}" data-page-size="{{ selected_page_size }}"
+                           data-account="{{ credential.account }}"
+                           data-client-id="{{ credential.client_id }}" data-tenant-id="{{ credential.tenant_id }}"
+                           data-subscription-id="{{ credential.subscription_id }}">
+                            <i class="bi bi-pencil" aria-hidden="true"></i>
+                            编辑
+                        </a>
+                        <form method="post" action="{{ url_for('account_delete', credential_id=credential.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="page" value="{{ pagination.page }}">
+                            <input type="hidden" name="per_page" value="{{ selected_page_size }}">
+                            <button class="btn btn-sm btn-danger" type="button"
+                                    data-bs-toggle="modal" data-bs-target="#confirm-action-modal"
+                                    data-confirm-title="删除账号" data-confirm-body="仅删除本地账号配置，不会删除 Azure 资源。确定继续？">
+                                <i class="bi bi-trash3" aria-hidden="true"></i>
+                                删除
+                            </button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="empty-state">暂无管理账号</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="table-footer combined-pagination-footer">
+    <div class="pagination-summary">
+        <span>共 {{ pagination.total }} 个账号</span>
+        <form method="get">
+            <select class="form-select form-select-sm page-size-select" name="per_page"
+                    aria-label="账号每页显示条数" data-submit-on-change>
+                {% for page_size in page_size_options %}
+                <option value="{{ page_size }}" {% if selected_page_size == page_size %}selected{% endif %}>{{ page_size }} 条/页</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+    <div class="pagination-controls">
+        <nav aria-label="账号分页">
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    {% if pagination.has_prev %}
+                    <a class="page-link" href="{{ url_for('index', page=pagination.prev_num, per_page=selected_page_size) }}" aria-label="上一页">
+                        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                    </a>
+                    {% else %}
+                    <span class="page-link" aria-disabled="true" aria-label="没有上一页"><i class="bi bi-chevron-left" aria-hidden="true"></i></span>
+                    {% endif %}
+                </li>
+                <li class="page-item active" aria-current="page"><span class="page-link">{{ pagination.page }}</span></li>
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    {% if pagination.has_next %}
+                    <a class="page-link" href="{{ url_for('index', page=pagination.next_num, per_page=selected_page_size) }}" aria-label="下一页">
+                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                    </a>
+                    {% else %}
+                    <span class="page-link" aria-disabled="true" aria-label="没有下一页"><i class="bi bi-chevron-right" aria-hidden="true"></i></span>
+                    {% endif %}
+                </li>
+            </ul>
+        </nav>
+        <form class="page-jump" method="get">
+            <input type="hidden" name="per_page" value="{{ selected_page_size }}">
+            <label for="account-page-jump">前往</label>
+            <input class="form-control form-control-sm" id="account-page-jump" type="number" name="page"
+                   min="1" max="{{ pagination.pages or 1 }}" value="{{ pagination.page }}"
+                   aria-label="账号跳转页码" data-page-jump>
+            <span>页</span>
+            <button class="visually-hidden" type="submit">跳转</button>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="account-modal" tabindex="-1" aria-labelledby="account-modal-title" aria-hidden="true"
+     data-open="{{ 'true' if account_modal else 'false' }}"
+     data-list-url="{{ url_for('index', page=pagination.page, per_page=selected_page_size) }}">
+    <div class="modal-dialog account-modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <form class="modal-content" method="post" id="account-form"
+              action="{{ account_modal.action if account_modal else url_for('account_add') }}">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="account-modal-title">{{ '编辑 Azure 账号' if edit_mode else '添加 Azure 账号' }}</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                {% if account_modal and account_modal.errors %}
+                <div class="alert alert-danger d-flex align-items-start gap-2" role="alert" id="account-modal-errors">
+                    <i class="bi bi-exclamation-circle flex-shrink-0" aria-hidden="true"></i>
+                    <div>{% for error in account_modal.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                </div>
+                {% endif %}
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="page" value="{{ account_modal.page if account_modal else pagination.page }}">
+                <input type="hidden" name="per_page" value="{{ account_modal.page_size if account_modal else selected_page_size }}">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label" for="account-name">账号名称</label>
+                        <input class="form-control" id="account-name" type="text" name="account"
+                               value="{{ modal_values.get('account', '') }}" maxlength="120" autocomplete="off" required>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="account-client-id">客户端 ID</label>
+                        <input class="form-control font-monospace" id="account-client-id" type="text" name="client_id"
+                               value="{{ modal_values.get('client_id', '') }}" autocomplete="off" required>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="account-tenant-id">租户 ID</label>
+                        <input class="form-control font-monospace" id="account-tenant-id" type="text" name="tenant_id"
+                               value="{{ modal_values.get('tenant_id', '') }}" autocomplete="off" required>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="account-subscription-id">订阅 ID</label>
+                        <input class="form-control font-monospace" id="account-subscription-id" type="text" name="subscription_id"
+                               value="{{ modal_values.get('subscription_id', '') }}" autocomplete="off" required>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="account-client-secret">客户端密钥</label>
+                        <input class="form-control" id="account-client-secret" type="text" name="client_secret"
+                               autocomplete="off" {% if not edit_mode %}required{% endif %}>
+                        <div class="form-text" id="account-secret-hint">
+                            {{ '留空时保留现有客户端密钥' if edit_mode else '保存前会验证 Azure 身份与订阅访问权限' }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light border" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-primary" type="submit">
+                    <i class="bi bi-shield-check" aria-hidden="true"></i>
+                    验证并保存
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}

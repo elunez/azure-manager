@@ -2,7 +2,7 @@
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.compute import ComputeManagementClient
-from azure.common.credentials import ServicePrincipalCredentials
+from azure.identity import ClientSecretCredential
 import logging
 import time
 import uuid
@@ -73,11 +73,17 @@ def image_reference(image):
 
 def create_credential_object(tenant_id, client_id, client_secret):
     print("生成身份证明对象")
-    tenant_id = tenant_id
-    client_id = client_id
-    client_secret = client_secret
-    credential = ServicePrincipalCredentials(tenant=tenant_id, client_id=client_id, secret=client_secret)
-    return credential
+    return ClientSecretCredential(
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+
+
+def validate_credential(subscription_id, credential):
+    """通过一次只读请求验证身份信息和订阅访问权限。"""
+    resource_client = ResourceManagementClient(credential, subscription_id)
+    next(iter(resource_client.resource_groups.list()), None)
 
 
 def create_resource_group(subscription_id, credential, tag, location):
@@ -226,35 +232,27 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
         raise
 
 
-def start_vm(subscription_id, credential, tag):
+def start_vm(subscription_id, credential, resource_group, vm_name):
     compute_client = ComputeManagementClient(credential, subscription_id)
-    GROUP_NAME = tag
-    VM_NAME = tag
-    async_vm_start = compute_client.virtual_machines.start(
-        GROUP_NAME, VM_NAME)
+    async_vm_start = compute_client.virtual_machines.start(resource_group, vm_name)
     async_vm_start.wait()
 
 
-def stop_vm(subscription_id, credential, tag):
+def stop_vm(subscription_id, credential, resource_group, vm_name):
     compute_client = ComputeManagementClient(credential, subscription_id)
-    GROUP_NAME = tag
-    VM_NAME = tag
-    async_vm_deallocate = compute_client.virtual_machines.deallocate(
-        GROUP_NAME, VM_NAME)
+    async_vm_deallocate = compute_client.virtual_machines.deallocate(resource_group, vm_name)
     async_vm_deallocate.wait()
 
 
-def delete_vm(subscription_id, credential, tag):
+def delete_vm(subscription_id, credential, resource_group):
     resource_client = ResourceManagementClient(credential, subscription_id)
-    GROUP_NAME = tag
-    resource_client.resource_groups.delete(GROUP_NAME).result()
+    resource_client.resource_groups.delete(resource_group).result()
 
 
-def change_ip(subscription_id, credential, tag):
+def change_ip(subscription_id, credential, resource_group_name, vm_name):
     compute_client = ComputeManagementClient(credential, subscription_id)
     network_client = NetworkManagementClient(credential, subscription_id)
-    resource_group_name = tag
-    vm = compute_client.virtual_machines.get(resource_group_name, tag)
+    vm = compute_client.virtual_machines.get(resource_group_name, vm_name)
 
     try:
         nic_reference = vm.network_profile.network_interfaces[0]
@@ -265,21 +263,22 @@ def change_ip(subscription_id, credential, tag):
         public_ip_resource_group, public_ip_name = resource_id_parts(ip_configuration.public_ip_address.id)
         public_ip = network_client.public_ip_addresses.get(public_ip_resource_group, public_ip_name)
     except (AttributeError, IndexError, StopIteration, ValueError):
-        logger.exception("VM %s has no replaceable public IP address", tag)
+        logger.exception("VM %s/%s has no replaceable public IP address", resource_group_name, vm_name)
         raise RuntimeError("未找到可替换的公网 IP")
 
     allocation_method = str(getattr(public_ip.public_ip_allocation_method, "value",
                                     public_ip.public_ip_allocation_method)).lower()
     if allocation_method == "dynamic":
-        logger.info("Changing dynamic public IP for VM %s by deallocating and starting it", tag)
-        compute_client.virtual_machines.deallocate(resource_group_name, tag).wait()
+        logger.info("Changing dynamic public IP for VM %s/%s by deallocating and starting it",
+                    resource_group_name, vm_name)
+        compute_client.virtual_machines.deallocate(resource_group_name, vm_name).wait()
         time.sleep(10)
-        compute_client.virtual_machines.start(resource_group_name, tag).wait()
+        compute_client.virtual_machines.start(resource_group_name, vm_name).wait()
         return
 
     if allocation_method != "static":
-        logger.error("VM %s public IP %s uses unsupported allocation method %s", tag, public_ip_name,
-                     public_ip.public_ip_allocation_method)
+        logger.error("VM %s/%s public IP %s uses unsupported allocation method %s",
+                     resource_group_name, vm_name, public_ip_name, public_ip.public_ip_allocation_method)
         raise RuntimeError("不支持的公网 IP 分配方式")
 
     replacement_ip_name = "{}-{}".format(public_ip_name[:71], uuid.uuid4().hex[:8])
@@ -294,15 +293,16 @@ def change_ip(subscription_id, credential, tag):
         replacement_parameters["zones"] = public_ip.zones
 
     try:
-        logger.info("Creating replacement static public IP %s for VM %s", replacement_ip_name, tag)
+        logger.info("Creating replacement static public IP %s for VM %s/%s",
+                    replacement_ip_name, resource_group_name, vm_name)
         replacement_ip = network_client.public_ip_addresses.create_or_update(
             public_ip_resource_group, replacement_ip_name, replacement_parameters).result()
         ip_configuration.public_ip_address = {"id": replacement_ip.id}
         network_client.network_interfaces.create_or_update(nic_resource_group, nic_name, nic).result()
         network_client.public_ip_addresses.delete(public_ip_resource_group, public_ip_name).result()
-        logger.info("Changed static public IP for VM %s", tag)
+        logger.info("Changed static public IP for VM %s/%s", resource_group_name, vm_name)
     except Exception:
-        logger.exception("Failed to replace static public IP for VM %s", tag)
+        logger.exception("Failed to replace static public IP for VM %s/%s", resource_group_name, vm_name)
         raise
 
 
@@ -313,22 +313,79 @@ def resource_id_parts(resource_id):
     return parts[resource_groups_index + 1], parts[-1]
 
 
-def list(subscription_id, credential):
+def enum_value(value):
+    return getattr(value, "value", value) if value is not None else None
+
+
+def vm_power_state(compute_client, resource_group, vm_name):
+    instance_view = compute_client.virtual_machines.instance_view(resource_group, vm_name)
+    for status in getattr(instance_view, "statuses", []) or []:
+        code = getattr(status, "code", "") or ""
+        if code.lower().startswith("powerstate/"):
+            state = code.split("/", 1)[1].lower()
+            return {
+                "running": "运行中",
+                "starting": "启动中",
+                "stopping": "停止中",
+                "stopped": "已停止",
+                "deallocating": "释放中",
+                "deallocated": "已停止并释放",
+            }.get(state, getattr(status, "display_status", None) or state)
+    return "未知"
+
+
+def vm_network_addresses(network_client, vm):
+    private_ips = []
+    public_ips = []
+    network_profile = getattr(vm, "network_profile", None)
+    for nic_reference in getattr(network_profile, "network_interfaces", []) or []:
+        nic_resource_group, nic_name = resource_id_parts(nic_reference.id)
+        nic = network_client.network_interfaces.get(nic_resource_group, nic_name)
+        for ip_configuration in getattr(nic, "ip_configurations", []) or []:
+            private_ip = getattr(ip_configuration, "private_ip_address", None)
+            if private_ip:
+                private_ips.append(private_ip)
+            public_ip_reference = getattr(ip_configuration, "public_ip_address", None)
+            if not public_ip_reference or not getattr(public_ip_reference, "id", None):
+                continue
+            public_ip_resource_group, public_ip_name = resource_id_parts(public_ip_reference.id)
+            public_ip = network_client.public_ip_addresses.get(public_ip_resource_group, public_ip_name)
+            public_ip_address = getattr(public_ip, "ip_address", None)
+            if public_ip_address:
+                public_ips.append(public_ip_address)
+    return private_ips, public_ips
+
+
+def list_vms(subscription_id, credential):
     network_client = NetworkManagementClient(credential, subscription_id)
-    info = network_client.public_ip_addresses.list_all()
     compute_client = ComputeManagementClient(credential, subscription_id)
-    info2 = compute_client.virtual_machines.list_all()
-    iplist = []
-    taglist = []
-    for info in info:
-        info = str(info)
-        info = str(info).replace("'", "").replace('"', "")
-        info = info.split(", ")[-7].split(" ")[1]
-        iplist.append(info)
-    for info2 in info2:
-        info2 = str(info2)
-        info2 = str(info2).replace("'", "").replace('"', "")
-        info2 = info2.split(", ")[2].split(" ")[1]
-        taglist.append(info2)
-    dict = {"ip": iplist, "tag": taglist}
-    return dict
+    virtual_machines = []
+    for vm in compute_client.virtual_machines.list_all():
+        resource_group, _ = resource_id_parts(vm.id)
+        details_error = None
+        try:
+            private_ips, public_ips = vm_network_addresses(network_client, vm)
+            power_state = vm_power_state(compute_client, resource_group, vm.name)
+        except Exception:
+            logger.exception("Failed to load details for VM %s/%s", resource_group, vm.name)
+            private_ips, public_ips = [], []
+            power_state = "读取失败"
+            details_error = "部分详情读取失败"
+
+        hardware_profile = getattr(vm, "hardware_profile", None)
+        storage_profile = getattr(vm, "storage_profile", None)
+        os_disk = getattr(storage_profile, "os_disk", None)
+        priority = enum_value(getattr(vm, "priority", None)) or "Regular"
+        virtual_machines.append({
+            "name": vm.name,
+            "resource_group": resource_group,
+            "location": getattr(vm, "location", None) or "-",
+            "size": enum_value(getattr(hardware_profile, "vm_size", None)) or "-",
+            "os_type": enum_value(getattr(os_disk, "os_type", None)) or "-",
+            "priority": priority,
+            "power_state": power_state,
+            "private_ips": private_ips,
+            "public_ips": public_ips,
+            "details_error": details_error,
+        })
+    return sorted(virtual_machines, key=lambda item: (item["resource_group"].lower(), item["name"].lower()))

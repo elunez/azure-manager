@@ -1,12 +1,33 @@
 {% extends 'base.html' %}
 
+{% block title %}登录 - Azure Manager{% endblock %}
+
 {% block content %}
-<h3></h3>
-<form method="post">
-    账号<br>
-    <input type="text" name="username" required><br><br>
-    密码<br>
-    <input type="password" name="password" required><br><br>
-    <input class="btn" type="submit" name="submit" value="登录">
-</form>
+<section class="auth-panel">
+    <div class="text-center mb-4">
+        <img class="auth-logo mb-3" src="{{ url_for('static', filename='azure.png') }}" alt="Azure Manager">
+        <h1 class="app-page-title">登录</h1>
+    </div>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+            <label class="form-label" for="login-username">用户名</label>
+            <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-person" aria-hidden="true"></i></span>
+                <input class="form-control" id="login-username" type="text" name="username" autocomplete="username" required autofocus>
+            </div>
+        </div>
+        <div class="mb-4">
+            <label class="form-label" for="login-password">密码</label>
+            <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-lock" aria-hidden="true"></i></span>
+                <input class="form-control" id="login-password" type="password" name="password" autocomplete="current-password" required>
+            </div>
+        </div>
+        <button class="btn btn-primary w-100" type="submit">
+            <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i>
+            登录
+        </button>
+    </form>
+</section>
 {% endblock %}

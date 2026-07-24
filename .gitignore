@@ -1,3 +1,6 @@
 /.idea
 .DS_Store
 azure/database.db
+.master-key
+__pycache__/
+*.py[cod]

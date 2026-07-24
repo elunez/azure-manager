@@ -1,19 +1,174 @@
 {% extends 'base.html' %}
 
+{% block title %}任务日志 - Azure Manager{% endblock %}
+
 {% block content %}
-    <p>任务日志（最近 200 条）</p>
-    <ul class="list">
-        {% for log in logs %}
-        <li>
-            {{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
-            | {{ log.status }}
-            | {{ log.account }}
-            | {{ log.action }}
-            | {{ log.target }}
-            {% if log.detail %}<br>{{ log.detail }}{% endif %}
-        </li>
-        {% else %}
-        <li>暂无任务日志</li>
-        {% endfor %}
-    </ul>
+<div class="app-page-header mb-4">
+    <div>
+        <h1 class="app-page-title">任务日志</h1>
+    </div>
+</div>
+
+<form method="get" class="log-filter-form mb-4">
+    <input type="hidden" name="per_page" value="{{ selected_page_size }}">
+    <div class="log-filter-field log-filter-status">
+        <label class="form-label" for="log-status">状态</label>
+        <select class="form-select form-select-sm" id="log-status" name="status">
+            <option value="">全部</option>
+            {% for status in statuses %}<option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="log-filter-field log-filter-account">
+        <label class="form-label" for="log-account">账号</label>
+        <select class="form-select form-select-sm" id="log-account" name="credential_id">
+            <option value="">全部</option>
+            {% for credential in credentials %}<option value="{{ credential.id }}" {% if selected_credential_id == credential.id|string %}selected{% endif %}>{{ credential.account }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="log-filter-field log-filter-search">
+        <label class="form-label" for="log-search">搜索</label>
+        <input class="form-control form-control-sm" id="log-search" type="search" name="q" value="{{ keyword }}"
+               placeholder="请输入账号、操作或 VM 名称">
+    </div>
+    <div class="filter-actions">
+        <div class="app-actions flex-nowrap">
+            <button class="btn btn-sm btn-primary" type="submit">
+                <i class="bi bi-funnel" aria-hidden="true"></i>
+                筛选
+            </button>
+            <a class="btn btn-sm btn-light border" href="{{ url_for('operation_logs') }}">
+                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                清除
+            </a>
+        </div>
+    </div>
+</form>
+
+<div class="table-panel table-responsive logs-table">
+    <table class="table table-hover align-middle mb-0">
+        <colgroup>
+            <col class="log-account-col">
+            <col class="log-action-col">
+            <col class="log-vm-col">
+            <col class="log-duration-col">
+            <col class="log-time-col">
+            <col class="log-status-col">
+            <col class="log-failure-col">
+        </colgroup>
+        <thead>
+            <tr><th>账号</th><th>操作</th><th>VM名称</th><th>耗时/秒</th><th>时间</th><th>状态</th><th>失败原因</th></tr>
+        </thead>
+        <tbody>
+            {% for log in pagination.items %}
+            <tr>
+                <td class="log-account-column">
+                    <span class="log-account-value" title="{{ log.account }}">{{ log.account }}</span>
+                </td>
+                <td>{{ log.action }}</td>
+                <td class="font-monospace">
+                    <span class="log-vm-value">{{ log.target }}</span>
+                </td>
+                <td class="text-nowrap">{{ log.duration_seconds }}</td>
+                <td class="text-body-secondary text-nowrap">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td><span class="badge status-badge status-{{ log.status }}">{{ log.status }}</span></td>
+                <td class="failure-column">
+                    <button class="btn btn-sm {{ 'btn-danger' if log.status == '失败' else 'btn-secondary' }}" type="button"
+                            {% if log.status == '失败' %}
+                            data-bs-toggle="modal" data-bs-target="#failure-detail-modal"
+                            data-failure-detail="{{ log.detail or '未知失败原因' }}"
+                            {% else %}
+                            disabled aria-disabled="true"
+                            {% endif %}>
+                        <i class="bi bi-eye" aria-hidden="true"></i>
+                        查看
+                    </button>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="empty-state">没有符合条件的任务</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="table-footer combined-pagination-footer">
+    <div class="pagination-summary">
+        <span>共 {{ pagination.total }} 条</span>
+        <form method="get">
+            <input type="hidden" name="status" value="{{ selected_status }}">
+            <input type="hidden" name="credential_id" value="{{ selected_credential_id }}">
+            <input type="hidden" name="q" value="{{ keyword }}">
+            <select class="form-select form-select-sm page-size-select" name="per_page"
+                    aria-label="每页显示条数" data-submit-on-change>
+                {% for page_size in page_size_options %}
+                <option value="{{ page_size }}" {% if selected_page_size == page_size %}selected{% endif %}>{{ page_size }} 条/页</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+    <div class="pagination-controls">
+        <nav aria-label="任务日志分页">
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    {% if pagination.has_prev %}
+                    <a class="page-link" href="{{ url_for('operation_logs', page=pagination.prev_num, status=selected_status, credential_id=selected_credential_id, q=keyword, per_page=selected_page_size) }}" aria-label="上一页">
+                        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                    </a>
+                    {% else %}
+                    <span class="page-link" aria-disabled="true" aria-label="没有上一页">
+                        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                    </span>
+                    {% endif %}
+                </li>
+                <li class="page-item active" aria-current="page"><span class="page-link">{{ pagination.page }}</span></li>
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    {% if pagination.has_next %}
+                    <a class="page-link" href="{{ url_for('operation_logs', page=pagination.next_num, status=selected_status, credential_id=selected_credential_id, q=keyword, per_page=selected_page_size) }}" aria-label="下一页">
+                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                    </a>
+                    {% else %}
+                    <span class="page-link" aria-disabled="true" aria-label="没有下一页">
+                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                    </span>
+                    {% endif %}
+                </li>
+            </ul>
+        </nav>
+        <form class="page-jump" method="get">
+            <input type="hidden" name="status" value="{{ selected_status }}">
+            <input type="hidden" name="credential_id" value="{{ selected_credential_id }}">
+            <input type="hidden" name="q" value="{{ keyword }}">
+            <input type="hidden" name="per_page" value="{{ selected_page_size }}">
+            <label for="log-page-jump">前往</label>
+            <input class="form-control form-control-sm" id="log-page-jump" type="number" name="page"
+                   min="1" max="{{ pagination.pages or 1 }}" value="{{ pagination.page }}"
+                   aria-label="日志跳转页码" data-page-jump>
+            <span>页</span>
+            <button class="visually-hidden" type="submit">跳转</button>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="failure-detail-modal" tabindex="-1" aria-labelledby="failure-detail-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="failure-detail-title">失败详情</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <pre class="failure-detail" id="failure-detail-content"></pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light border" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if has_active_tasks %}
+<script>window.setTimeout(function () { window.location.reload(); }, 5000);</script>
+{% endif %}
 {% endblock %}
