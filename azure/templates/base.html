@@ -30,9 +30,21 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint in ('cost_overview', 'cost_overview_data') %}active{% endif %}" href="{{ url_for('cost_overview') }}">
+                            <i class="bi bi-currency-dollar" aria-hidden="true"></i>
+                            <span>费用概览</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'operation_logs' %}active{% endif %}" href="{{ url_for('operation_logs') }}">
                             <i class="bi bi-list-task" aria-hidden="true"></i>
                             <span>任务日志</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'system_settings' %}active{% endif %}" href="{{ url_for('system_settings') }}">
+                            <i class="bi bi-gear" aria-hidden="true"></i>
+                            <span>系统设置</span>
                         </a>
                     </li>
                     <li class="nav-item">
@@ -47,17 +59,25 @@
         </div>
     </header>
 
-    <main class="app-main flex-grow-1">
+    <main class="app-main flex-grow-1{% block main_class %}{% endblock %}">
         <div class="container app-container">
-            <section class="app-shell">
+            <section class="app-shell{% block shell_class %}{% endblock %}">
                 {% block content %}{% endblock %}
             </section>
         </div>
     </main>
 
     <footer class="app-footer">
-        <div class="container app-container text-body-secondary">
-            <small>&copy; 2026 Azure Manager</small>
+        <div class="container app-container text-center text-body-secondary">
+            <small class="app-footer-content">
+                <span>&copy; 2026 Azure Manager</span>
+                <span class="app-footer-separator" aria-hidden="true">|</span>
+                <a class="app-footer-link" href="https://github.com/elunez/azure-manager"
+                   target="_blank" rel="noopener noreferrer">
+                    <i class="bi bi-github" aria-hidden="true"></i>
+                    <span>elunez/azure-manager</span>
+                </a>
+            </small>
         </div>
     </footer>
 </div>

@@ -33,7 +33,7 @@
             <tr>
                 <td>{{ credential.account }}</td>
                 <td><code class="text-body">{{ credential.subscription_id }}</code></td>
-                <td class="text-body-secondary text-nowrap">{{ credential.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td class="text-body-secondary text-nowrap">{{ credential.updated_at|local_datetime }}</td>
                 <td class="actions-column">
                     <div class="action-group">
                         <a class="btn btn-sm btn-light border" href="{{ url_for('vm_list', credential_id=credential.id) }}">
@@ -74,7 +74,7 @@
 <div class="table-footer combined-pagination-footer">
     <div class="pagination-summary">
         <span>共 {{ pagination.total }} 个账号</span>
-        <form method="get">
+        <form class="page-size-form" method="get">
             <select class="form-select form-select-sm page-size-select" name="per_page"
                     aria-label="账号每页显示条数" data-submit-on-change>
                 {% for page_size in page_size_options %}
@@ -139,30 +139,30 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="page" value="{{ account_modal.page if account_modal else pagination.page }}">
                 <input type="hidden" name="per_page" value="{{ account_modal.page_size if account_modal else selected_page_size }}">
-                <div class="row g-3">
+                <div class="row app-form-grid">
                     <div class="col-12">
                         <label class="form-label" for="account-name">账号名称</label>
-                        <input class="form-control" id="account-name" type="text" name="account"
+                        <input class="form-control form-control-sm" id="account-name" type="text" name="account"
                                value="{{ modal_values.get('account', '') }}" maxlength="120" autocomplete="off" required>
                     </div>
                     <div class="col-12">
                         <label class="form-label" for="account-client-id">客户端 ID</label>
-                        <input class="form-control font-monospace" id="account-client-id" type="text" name="client_id"
+                        <input class="form-control form-control-sm font-monospace" id="account-client-id" type="text" name="client_id"
                                value="{{ modal_values.get('client_id', '') }}" autocomplete="off" required>
                     </div>
                     <div class="col-12">
                         <label class="form-label" for="account-tenant-id">租户 ID</label>
-                        <input class="form-control font-monospace" id="account-tenant-id" type="text" name="tenant_id"
+                        <input class="form-control form-control-sm font-monospace" id="account-tenant-id" type="text" name="tenant_id"
                                value="{{ modal_values.get('tenant_id', '') }}" autocomplete="off" required>
                     </div>
                     <div class="col-12">
                         <label class="form-label" for="account-subscription-id">订阅 ID</label>
-                        <input class="form-control font-monospace" id="account-subscription-id" type="text" name="subscription_id"
+                        <input class="form-control form-control-sm font-monospace" id="account-subscription-id" type="text" name="subscription_id"
                                value="{{ modal_values.get('subscription_id', '') }}" autocomplete="off" required>
                     </div>
                     <div class="col-12">
                         <label class="form-label" for="account-client-secret">客户端密钥</label>
-                        <input class="form-control" id="account-client-secret" type="text" name="client_secret"
+                        <input class="form-control form-control-sm" id="account-client-secret" type="text" name="client_secret"
                                autocomplete="off" {% if not edit_mode %}required{% endif %}>
                         <div class="form-text" id="account-secret-hint">
                             {{ '留空时保留现有客户端密钥' if edit_mode else '保存前会验证 Azure 身份与订阅访问权限' }}
@@ -171,8 +171,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-light border" data-bs-dismiss="modal">取消</button>
-                <button class="btn btn-primary" type="submit">
+                <button type="button" class="btn btn-sm btn-light border" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-sm btn-primary" type="submit">
                     <i class="bi bi-shield-check" aria-hidden="true"></i>
                     验证并保存
                 </button>

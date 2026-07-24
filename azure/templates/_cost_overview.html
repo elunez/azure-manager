@@ -1,0 +1,116 @@
+{% if overview.warnings %}
+<div class="alert alert-warning py-2" role="status">
+    {% for warning in overview.warnings %}<div>{{ warning }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="cost-summary-grid mb-4">
+    <section class="cost-summary-card">
+        <div class="cost-summary-label">本月累计消费</div>
+        <div class="cost-summary-value">{{ '%.2f'|format(overview.month_to_date) }} <small>{{ overview.currency }}</small></div>
+        <div class="cost-summary-hint">Azure 已返回的实际费用</div>
+    </section>
+    <section class="cost-summary-card">
+        <div class="cost-summary-label">最近一天消费</div>
+        <div class="cost-summary-value">{{ '%.2f'|format(overview.latest_daily_cost) }} <small>{{ overview.currency }}</small></div>
+        <div class="cost-summary-hint">{{ overview.data_through or '暂无费用日期' }}</div>
+    </section>
+    <section class="cost-summary-card">
+        <div class="cost-summary-label">本月最高单日消费</div>
+        <div class="cost-summary-value">{{ '%.2f'|format(overview.peak_daily_cost) }} <small>{{ overview.currency }}</small></div>
+        <div class="cost-summary-hint">{{ overview.peak_daily_date or '暂无费用日期' }}</div>
+    </section>
+    <section class="cost-summary-card">
+        <div class="cost-summary-label">数据截至</div>
+        <div class="cost-summary-value cost-date-value">{{ overview.data_through or '暂无数据' }}</div>
+        <div class="cost-summary-hint">查询时间 {{ overview.fetched_at|local_datetime }} {{ current_user.timezone or 'Asia/Shanghai' }}</div>
+    </section>
+</div>
+
+{% if overview.is_empty %}
+<div class="cost-empty-state">
+    <i class="bi bi-receipt" aria-hidden="true"></i>
+    <h2>本月暂无收费数据</h2>
+</div>
+{% else %}
+<section class="cost-section mb-4">
+    <div class="cost-section-heading">
+        <div>
+            <h2>每日消费趋势</h2>
+            <p>最近 14 个有费用数据的日期</p>
+        </div>
+    </div>
+    {% if overview.daily %}
+    <div class="cost-line-chart-wrap">
+        <svg class="cost-line-chart" data-cost-line-chart
+             data-chart-points='{{ overview.daily|tojson }}'
+             data-chart-currency="{{ overview.currency }}"
+             data-chart-min="{{ overview.chart_min_cost }}"
+             data-chart-max="{{ overview.chart_max_cost }}"
+             data-chart-zero-ratio="{{ overview.chart_zero_ratio }}"
+             role="img" aria-label="最近每日消费折线图"></svg>
+    </div>
+    {% else %}
+    <div class="cost-section-empty">暂无每日费用数据</div>
+    {% endif %}
+</section>
+
+<div class="cost-breakdown-grid">
+    <section class="cost-section">
+        <div class="cost-section-heading">
+            <div>
+                <h2>服务费用</h2>
+                <p>费用最高的 10 个服务</p>
+            </div>
+        </div>
+        {% if overview.services %}
+        <div class="table-panel cost-table-panel cost-service-table-panel">
+            <table class="table table-hover align-middle mb-0">
+                <thead><tr><th>服务</th><th class="text-end">占比</th><th class="text-end">费用</th></tr></thead>
+                <tbody>
+                    {% for service in overview.services %}
+                    <tr>
+                        <td><span class="cost-name" title="{{ service.name }}">{{ service.name }}</span></td>
+                        <td class="text-end text-body-secondary">{{ '%.1f'|format(service.share) }}%</td>
+                        <td class="text-end text-nowrap">{{ '%.2f'|format(service.cost) }} {{ overview.currency }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="cost-section-empty">暂无服务费用明细</div>
+        {% endif %}
+    </section>
+
+    <section class="cost-section">
+        <div class="cost-section-heading">
+            <div>
+                <h2>资源费用</h2>
+                <p>费用最高的 10 个资源</p>
+            </div>
+        </div>
+        {% if overview.resources %}
+        <div class="table-panel cost-table-panel cost-resource-table-panel">
+            <table class="table table-hover align-middle mb-0">
+                <thead><tr><th>资源</th><th>资源组</th><th class="text-end">费用</th></tr></thead>
+                <tbody>
+                    {% for resource in overview.resources %}
+                    <tr>
+                        <td>
+                            <span class="cost-name" title="{{ resource.name }}">{{ resource.name }}</span>
+                            <small class="cost-resource-type">{{ resource.resource_type }}</small>
+                        </td>
+                        <td><span class="cost-name" title="{{ resource.resource_group }}">{{ resource.resource_group }}</span></td>
+                        <td class="text-end text-nowrap">{{ '%.2f'|format(resource.cost) }} {{ overview.currency }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="cost-section-empty">暂无可关联到具体资源的费用</div>
+        {% endif %}
+    </section>
+</div>
+{% endif %}

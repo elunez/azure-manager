@@ -1,6 +1,8 @@
 {% extends 'base.html' %}
 
 {% block title %}任务日志 - Azure Manager{% endblock %}
+{% block main_class %} logs-main{% endblock %}
+{% block shell_class %} logs-shell{% endblock %}
 
 {% block content %}
 <div class="app-page-header mb-4">
@@ -69,7 +71,7 @@
                     <span class="log-vm-value">{{ log.target }}</span>
                 </td>
                 <td class="text-nowrap">{{ log.duration_seconds }}</td>
-                <td class="text-body-secondary text-nowrap">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td class="text-body-secondary text-nowrap">{{ log.created_at|local_datetime }}</td>
                 <td><span class="badge status-badge status-{{ log.status }}">{{ log.status }}</span></td>
                 <td class="failure-column">
                     <button class="btn btn-sm {{ 'btn-danger' if log.status == '失败' else 'btn-secondary' }}" type="button"
@@ -94,7 +96,7 @@
 <div class="table-footer combined-pagination-footer">
     <div class="pagination-summary">
         <span>共 {{ pagination.total }} 条</span>
-        <form method="get">
+        <form class="page-size-form" method="get">
             <input type="hidden" name="status" value="{{ selected_status }}">
             <input type="hidden" name="credential_id" value="{{ selected_credential_id }}">
             <input type="hidden" name="q" value="{{ keyword }}">

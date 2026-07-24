@@ -22,7 +22,6 @@ class VirtualMachineOperations:
             "/subscriptions/sub/resourceGroups/vm-rg/providers/Microsoft.Compute/virtualMachines/legacy-vm",
             name="legacy-vm",
             location="japaneast",
-            priority="Spot",
             hardware_profile=resource(vm_size="Standard_B1s"),
             storage_profile=resource(os_disk=resource(os_type="Linux")),
             network_profile=resource(network_interfaces=[nic]),

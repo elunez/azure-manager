@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+
+{% block title %}费用概览 - Azure Manager{% endblock %}
+
+{% block content %}
+<div class="app-page-header mb-4">
+    <div>
+        <h1 class="app-page-title">费用概览</h1>
+        <p class="app-page-subtitle">查看订阅本月累计费用、每日趋势和资源费用分布</p>
+    </div>
+    {% if selected_credential %}
+    <button class="btn btn-sm btn-light border" type="button" id="cost-refresh">
+        <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+        刷新
+    </button>
+    {% endif %}
+</div>
+
+{% if selected_credential %}
+<div class="cost-toolbar mb-4">
+    <form class="cost-account-form" method="get">
+        <label class="form-label mb-0" for="cost-account">账号</label>
+        <select class="form-select form-select-sm" id="cost-account" name="credential_id" data-submit-on-change>
+            {% for credential in credentials %}
+            <option value="{{ credential.id }}" {% if credential.id == selected_credential.id %}selected{% endif %}>
+                {{ credential.account }}
+            </option>
+            {% endfor %}
+        </select>
+    </form>
+    <div class="cost-subscription text-body-secondary">
+        <span>订阅 ID</span>
+        <code class="text-body">{{ selected_credential.subscription_id }}</code>
+    </div>
+</div>
+
+<div id="cost-overview-content"
+     data-cost-url="{{ url_for('cost_overview_data', credential_id=selected_credential.id) }}"
+     aria-busy="true">
+    <div class="cost-loading-state">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        正在加载费用数据...
+    </div>
+</div>
+{% else %}
+<div class="empty-view">
+    <i class="bi bi-person-plus empty-view-icon" aria-hidden="true"></i>
+    <h2 class="empty-view-title">暂无可查询的账号</h2>
+    <p class="empty-view-text">请先添加 Azure 账号，再查看订阅费用。</p>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('index', modal='add') }}">
+        <i class="bi bi-person-plus" aria-hidden="true"></i>
+        添加账号
+    </a>
+</div>
+{% endif %}
+{% endblock %}

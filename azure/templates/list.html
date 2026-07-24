@@ -9,6 +9,10 @@
         <p class="app-page-subtitle">{{ credential.account }} · <span id="vm-count">加载中</span></p>
     </div>
     <div class="app-actions">
+        <a class="btn btn-sm btn-light border" href="{{ url_for('index') }}">
+            <i class="bi bi-arrow-left" aria-hidden="true"></i>
+            返回
+        </a>
         <button class="btn btn-sm btn-light border" type="button" id="vm-refresh">
             <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
             刷新

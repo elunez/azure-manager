@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+
+{% block title %}系统设置 - Azure Manager{% endblock %}
+
+{% macro error_alert(items) %}
+{% if items %}
+<div class="alert alert-danger py-2" role="alert">
+    {% for error in items %}<div>{{ error }}</div>{% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="app-page-header mb-4">
+    <div>
+        <h1 class="app-page-title">系统设置</h1>
+        <p class="app-page-subtitle">管理常规选项、VM 参数和账号安全</p>
+    </div>
+</div>
+
+<section class="settings-tabs-panel">
+    <div class="settings-tabs-scroll">
+        <ul class="nav nav-tabs settings-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link {% if active_tab == 'general' %}active{% endif %}" id="settings-general-tab"
+                        data-bs-toggle="tab" data-bs-target="#settings-general-pane" type="button" role="tab"
+                        data-settings-tab="general"
+                        aria-controls="settings-general-pane" aria-selected="{{ 'true' if active_tab == 'general' else 'false' }}">
+                    <i class="bi bi-sliders" aria-hidden="true"></i>
+                    常规设置
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link {% if active_tab == 'account' %}active{% endif %}" id="settings-account-tab"
+                        data-bs-toggle="tab" data-bs-target="#settings-account-pane" type="button" role="tab"
+                        data-settings-tab="account"
+                        aria-controls="settings-account-pane" aria-selected="{{ 'true' if active_tab == 'account' else 'false' }}">
+                    <i class="bi bi-shield-lock" aria-hidden="true"></i>
+                    账号安全
+                </button>
+            </li>
+        </ul>
+    </div>
+
+    <div class="tab-content settings-tab-content">
+        <div class="tab-pane fade {% if active_tab == 'general' %}show active{% endif %}" id="settings-general-pane"
+             role="tabpanel" aria-labelledby="settings-general-tab" tabindex="0">
+            {{ error_alert(errors.general) }}
+            <form method="post" id="settings-general-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="section" value="general">
+                <div class="row app-form-grid mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label" for="settings-timezone">默认时区</label>
+                        <select class="form-select form-select-sm" id="settings-timezone" name="timezone" required>
+                            {% for timezone_name, timezone_label in timezone_options %}
+                            <option value="{{ timezone_name }}" {% if values.timezone == timezone_name %}selected{% endif %}>{{ timezone_label }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">账号更新时间、任务日志和费用查询时间都会按此时区显示。</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="settings-vm-cache-days">VM 列表缓存时间</label>
+                        <div class="input-group input-group-sm">
+                            <input class="form-control form-control-sm" id="settings-vm-cache-days" name="vm_cache_days"
+                                   type="number" min="1" max="30" step="1"
+                                   value="{{ values.vm_cache_days }}" required>
+                            <span class="input-group-text">天</span>
+                        </div>
+                        <div class="form-text">应用重启后将重新获取 VM 列表；点击“刷新”也可立即获取最新数据。</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="settings-default-vm-script">默认 Base64 脚本</label>
+                    <textarea class="form-control form-control-sm font-monospace" id="settings-default-vm-script"
+                              name="default_vm_script" rows="8" spellcheck="false"
+                              placeholder="留空表示创建 VM 时不使用默认脚本">{{ values.default_vm_script }}</textarea>
+                    <div class="form-text">创建 VM 时会自动填入此脚本。内容须为有效的 Base64，解码后不能超过 64 KB，并会加密保存。</div>
+                </div>
+                <div class="settings-tab-actions">
+                    <button class="btn btn-sm btn-primary" type="submit">保存常规设置</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="tab-pane fade {% if active_tab == 'account' %}show active{% endif %}" id="settings-account-pane"
+             role="tabpanel" aria-labelledby="settings-account-tab" tabindex="0">
+            {{ error_alert(errors.account) }}
+            <form method="post" id="settings-account-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="section" value="account">
+                <div class="row app-form-grid">
+                    <div class="col-md-6">
+                        <label class="form-label" for="settings-username">登录账号名</label>
+                        <input class="form-control form-control-sm" id="settings-username" name="username" type="text"
+                               value="{{ values.username }}" maxlength="20" autocomplete="username" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="settings-current-password">当前密码</label>
+                        <input class="form-control form-control-sm" id="settings-current-password" name="current_password"
+                               type="password" autocomplete="current-password">
+                        <div class="form-text">修改登录账号名或密码时必须填写。</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="settings-new-password">新密码</label>
+                        <input class="form-control form-control-sm" id="settings-new-password" name="new_password"
+                               type="password" minlength="8" autocomplete="new-password">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="settings-password-confirmation">确认新密码</label>
+                        <input class="form-control form-control-sm" id="settings-password-confirmation" name="password_confirmation"
+                               type="password" minlength="8" autocomplete="new-password">
+                    </div>
+                </div>
+                <div class="settings-tab-actions mt-4">
+                    <button class="btn btn-sm btn-primary" type="submit">保存账号安全设置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -1,6 +1,8 @@
 {% extends 'base.html' %}
 
 {% block title %}创建 VM - Azure Manager{% endblock %}
+{% block main_class %} create-vm-main{% endblock %}
+{% block shell_class %} create-vm-shell{% endblock %}
 
 {% block content %}
 <div class="app-page-header mb-4">
@@ -8,30 +10,30 @@
         <h1 class="app-page-title">创建 VM</h1>
         <p class="app-page-subtitle">{{ credential.account }}</p>
     </div>
-    <a class="btn btn-light border app-primary-action" href="{{ url_for('vm_list', credential_id=credential.id) }}">
+    <a class="btn btn-sm btn-light border app-primary-action" href="{{ url_for('vm_list', credential_id=credential.id) }}">
         <i class="bi bi-arrow-left" aria-hidden="true"></i>
         返回 VM 列表
     </a>
 </div>
 
 {% if errors %}
-<div class="alert alert-danger d-flex align-items-start gap-2 form-surface" role="alert">
+<div class="alert alert-danger d-flex align-items-start gap-2" role="alert">
     <i class="bi bi-exclamation-circle flex-shrink-0" aria-hidden="true"></i>
     <div>{% for error in errors %}<div>{{ error }}</div>{% endfor %}</div>
 </div>
 {% endif %}
 
-<form method="post" class="form-surface">
+<form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="row g-3">
+    <div class="row app-form-grid">
         <div class="col-md-6">
             <label class="form-label" for="vm-name">名称</label>
-            <input class="form-control" id="vm-name" type="text" name="tag" value="{{ values.get('tag', '') }}"
+            <input class="form-control form-control-sm" id="vm-name" type="text" name="tag" value="{{ values.get('tag', '') }}"
                    maxlength="64" autocomplete="off" required>
         </div>
         <div class="col-md-6">
-            <label class="form-label" for="vm-location">区域</label>
-            <select class="form-select" id="vm-location" name="location" required>
+            <label class="form-label" for="vm-location">位置</label>
+            <select class="form-select form-select-sm" id="vm-location" name="location" required>
                 {% for value, label in locations %}
                 <option value="{{ value }}" {% if values.get('location', 'eastasia') == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
@@ -39,7 +41,7 @@
         </div>
         <div class="col-md-6">
             <label class="form-label" for="vm-size">机型</label>
-            <select class="form-select" id="vm-size" name="size" required>
+            <select class="form-select form-select-sm" id="vm-size" name="size" required>
                 {% for value, label in sizes %}
                 <option value="{{ value }}" {% if values.get('size', 'Standard_B2ats_v2') == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
@@ -47,48 +49,34 @@
         </div>
         <div class="col-md-6">
             <label class="form-label" for="vm-count">数量</label>
-            <select class="form-select" id="vm-count" name="count" required>
+            <select class="form-select form-select-sm" id="vm-count" name="count" required>
                 {% for count in range(1, 6) %}
                 <option value="{{ count }}" {% if values.get('count', 1)|int == count %}selected{% endif %}>{{ count }} 台</option>
                 {% endfor %}
             </select>
         </div>
-        <div class="col-12">
+        <div class="col-md-6">
             <label class="form-label" for="vm-os">系统镜像</label>
-            <select class="form-select" id="vm-os" name="os" required>
+            <select class="form-select form-select-sm" id="vm-os" name="os" required>
                 {% for value, image in images.items() %}
                 <option value="{{ value }}" {% if values.get('os', 'Debian_12_X64') == value %}selected{% endif %}>{{ image.display }}</option>
                 {% endfor %}
             </select>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-6">
             <label class="form-label" for="vm-disk">系统磁盘</label>
-            <select class="form-select" id="vm-disk" name="disk" required>
+            <select class="form-select form-select-sm" id="vm-disk" name="disk" required>
                 {% for disk_size in disk_sizes %}
                 <option value="{{ disk_size }}" {% if values.get('disk', 64)|int == disk_size %}selected{% endif %}>{{ disk_size }} GB</option>
                 {% endfor %}
             </select>
         </div>
-        <div class="col-md-4">
-            <label class="form-label" for="vm-acc">加速网络</label>
-            <select class="form-select" id="vm-acc" name="acc" required>
-                <option value="False" {% if values.get('acc', 'False') == 'False' %}selected{% endif %}>关闭</option>
-                <option value="True" {% if values.get('acc') == 'True' %}selected{% endif %}>开启</option>
-            </select>
-        </div>
-        <div class="col-md-4">
-            <label class="form-label" for="vm-spot">Spot 实例</label>
-            <select class="form-select" id="vm-spot" name="spot" required>
-                <option value="False" {% if values.get('spot', 'False') == 'False' %}selected{% endif %}>关闭</option>
-                <option value="True" {% if values.get('spot') == 'True' %}selected{% endif %}>开启</option>
-            </select>
-        </div>
         <div class="col-12">
             <label class="form-label" for="vm-custom">自定义脚本（Base64）</label>
-            <textarea class="form-control font-monospace" id="vm-custom" name="custom" rows="5" spellcheck="false">{{ values.get('custom', '') }}</textarea>
+            <textarea class="form-control form-control-sm font-monospace" id="vm-custom" name="custom" rows="8" spellcheck="false">{{ values.get('custom', '') }}</textarea>
         </div>
-        <div class="col-12 pt-2">
-            <button class="btn btn-primary" type="submit">
+        <div class="col-12 pt-2 d-flex justify-content-end">
+            <button class="btn btn-sm btn-primary" type="submit">
                 <i class="bi bi-play-fill" aria-hidden="true"></i>
                 提交创建任务
             </button>

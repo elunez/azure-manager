@@ -99,7 +99,7 @@ def create_resource_group(subscription_id, credential, tag, location):
                                                                  )
 
 
-def create_or_update_vm(subscription_id, credential, tag, location, username, password, size, os, custom, acc, disk, spot):
+def create_or_update_vm(subscription_id, credential, tag, location, username, password, size, os, custom, disk):
     compute_client = ComputeManagementClient(credential, subscription_id)
     RESOURCE_GROUP_NAME = tag
     VNET_NAME = ("vnet-" + tag)
@@ -115,7 +115,6 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
     SIZE = size
     DISK = disk
     CUSTOM = custom
-    ACC = acc
     network_client = NetworkManagementClient(credential, subscription_id)
     try:
         print("Create VNET")
@@ -190,8 +189,7 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
                                                                         }],
                                                                         "network_security_group": {
                                                                             "id": security_group_result.id
-                                                                        },
-                                                                        "enableAcceleratedNetworking": ACC
+                                                                        }
                                                                     }
                                                                     )
         nic_result = poller.result()
@@ -214,12 +212,6 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
             },
             "network_profile": {"network_interfaces": [{"id": nic_result.id}]}
         }
-        if spot == "True":
-            vm_parameters.update({
-                "priority": "Spot",
-                "evictionPolicy": "Delete",
-                "billingProfile": {"maxPrice": -1}
-            })
         poller = compute_client.virtual_machines.create_or_update(RESOURCE_GROUP_NAME, VM_NAME, vm_parameters)
         vm_result = poller.result()
         print("Create VM {} successful".format(tag))
@@ -375,14 +367,12 @@ def list_vms(subscription_id, credential):
         hardware_profile = getattr(vm, "hardware_profile", None)
         storage_profile = getattr(vm, "storage_profile", None)
         os_disk = getattr(storage_profile, "os_disk", None)
-        priority = enum_value(getattr(vm, "priority", None)) or "Regular"
         virtual_machines.append({
             "name": vm.name,
             "resource_group": resource_group,
             "location": getattr(vm, "location", None) or "-",
             "size": enum_value(getattr(hardware_profile, "vm_size", None)) or "-",
             "os_type": enum_value(getattr(os_disk, "os_type", None)) or "-",
-            "priority": priority,
             "power_state": power_state,
             "private_ips": private_ips,
             "public_ips": public_ips,

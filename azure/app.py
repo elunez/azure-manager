@@ -4,19 +4,24 @@ import os
 import re
 import secrets
 import string
+import time
 import uuid
+from math import ceil
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
+from threading import Lock
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import click
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, has_request_context, jsonify, redirect, render_template, request, session, url_for
 from flask_login import LoginManager, UserMixin, current_user, login_required, login_user, logout_user
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, or_, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import function
+import cost_management
 from credential_security import (
     CredentialCipher,
     derive_session_key,
@@ -64,9 +69,12 @@ VM_SIZES = [
     ("Standard_B1s", "B1s（1 核 1 GB，AMD）"),
 ]
 DISK_SIZES = (64, 128, 256)
-ACCOUNT_PAGE_SIZE = 8
-LOG_PAGE_SIZE = 8
-PAGE_SIZE_OPTIONS = (8, 20, 50)
+ACCOUNT_PAGE_SIZE = 10
+PAGE_SIZE_OPTIONS = (10, 20, 50)
+DEFAULT_VM_CACHE_DAYS = 1
+MIN_VM_CACHE_DAYS = 1
+MAX_VM_CACHE_DAYS = 30
+SECONDS_PER_DAY = 24 * 60 * 60
 TASK_STATUSES = ("排队中", "执行中", "成功", "失败", "中断")
 ACTIVE_TASK_STATUSES = ("排队中", "执行中")
 RESOURCE_GROUP_PATTERN = re.compile(r"^[A-Za-z0-9_.()\-]{1,90}$")
@@ -89,6 +97,31 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 task_executor = ThreadPoolExecutor(max_workers=max(1, int(os.environ.get("AZURE_MANAGER_WORKERS", "4"))))
+cost_cache = {}
+cost_rate_limit_cooldowns = {}
+cost_query_locks = {}
+cost_cache_lock = Lock()
+vm_cache = {}
+vm_query_locks = {}
+vm_cache_lock = Lock()
+COST_CACHE_SECONDS = 1800
+COST_RATE_LIMIT_COOLDOWN_SECONDS = 60
+COST_API_SUPPORTED = "supported"
+COST_API_UNSUPPORTED = "unsupported"
+DEFAULT_TIMEZONE = "Asia/Shanghai"
+TIMEZONE_OPTIONS = (
+    ("Asia/Shanghai", "上海（Asia/Shanghai）"),
+    ("Asia/Hong_Kong", "香港（Asia/Hong_Kong）"),
+    ("Asia/Tokyo", "东京（Asia/Tokyo）"),
+    ("Asia/Seoul", "首尔（Asia/Seoul）"),
+    ("Asia/Singapore", "新加坡（Asia/Singapore）"),
+    ("Australia/Sydney", "悉尼（Australia/Sydney）"),
+    ("Europe/London", "伦敦（Europe/London）"),
+    ("Europe/Paris", "巴黎（Europe/Paris）"),
+    ("America/New_York", "纽约（America/New_York）"),
+    ("America/Los_Angeles", "洛杉矶（America/Los_Angeles）"),
+    ("UTC", "协调世界时（UTC）"),
+)
 
 
 def friendly_error_message(error):
@@ -125,6 +158,35 @@ def csrf_token():
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+def user_timezone_name(user=None):
+    if user is None:
+        if not has_request_context() or not current_user.is_authenticated:
+            return DEFAULT_TIMEZONE
+        user = current_user
+    timezone_name = getattr(user, "timezone", None)
+    try:
+        ZoneInfo(timezone_name or DEFAULT_TIMEZONE)
+    except (TypeError, ValueError, ZoneInfoNotFoundError):
+        return DEFAULT_TIMEZONE
+    return timezone_name or DEFAULT_TIMEZONE
+
+
+def format_local_datetime(value, timezone_name=None, date_format="%Y-%m-%d %H:%M:%S"):
+    if value is None:
+        return ""
+    if not isinstance(value, datetime):
+        return str(value)
+    source = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    target_timezone = user_timezone_name() if timezone_name is None else timezone_name
+    try:
+        return source.astimezone(ZoneInfo(target_timezone)).strftime(date_format)
+    except (TypeError, ValueError, ZoneInfoNotFoundError):
+        return source.astimezone(ZoneInfo(DEFAULT_TIMEZONE)).strftime(date_format)
+
+
+app.jinja_env.filters["local_datetime"] = format_local_datetime
 
 
 @app.before_request
@@ -174,6 +236,7 @@ class Credential(db.Model):
     client_secret = db.Column(db.Text, nullable=False)
     tenant_id = db.Column(db.String(60), nullable=False)
     subscription_id = db.Column(db.String(60), nullable=False)
+    cost_api_status = db.Column(db.String(20), nullable=True)
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
@@ -190,15 +253,25 @@ class Credential(db.Model):
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(20))
     username = db.Column(db.String(20))
     password_hash = db.Column(db.String(128))
+    timezone = db.Column(db.String(64), nullable=False, default=DEFAULT_TIMEZONE)
+    vm_cache_days = db.Column(db.Integer, nullable=False, default=DEFAULT_VM_CACHE_DAYS)
+    default_vm_script = db.Column(db.Text, nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password, method="pbkdf2:sha256")
 
     def validate_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+    def get_default_vm_script(self):
+        return credential_cipher.decrypt(self.default_vm_script) if self.default_vm_script else ""
+
+    def set_default_vm_script(self, base64_script):
+        self.default_vm_script = (
+            credential_cipher.encrypt(base64_script) if base64_script else None
+        )
 
 
 class OperationLog(db.Model):
@@ -251,6 +324,69 @@ def migrate_credential_updated_at():
         ))
 
 
+def migrate_credential_cost_api_status():
+    inspector = inspect(db.engine)
+    columns = {column["name"] for column in inspector.get_columns(Credential.__tablename__)}
+    if "cost_api_status" in columns:
+        return
+
+    with db.engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE credential ADD COLUMN cost_api_status VARCHAR(20)"
+        ))
+
+
+def migrate_user_timezone():
+    inspector = inspect(db.engine)
+    columns = {column["name"] for column in inspector.get_columns(User.__tablename__)}
+    if "timezone" not in columns:
+        with db.engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE user ADD COLUMN timezone VARCHAR(64)"
+            ))
+    with db.engine.begin() as connection:
+        connection.execute(
+            text("UPDATE user SET timezone = :timezone WHERE timezone IS NULL OR timezone = ''"),
+            {"timezone": DEFAULT_TIMEZONE},
+        )
+
+
+def migrate_user_default_vm_script():
+    inspector = inspect(db.engine)
+    columns = {column["name"] for column in inspector.get_columns(User.__tablename__)}
+    if "default_vm_script" in columns:
+        return
+
+    with db.engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE user ADD COLUMN default_vm_script TEXT"
+        ))
+
+
+def migrate_user_vm_cache_days():
+    inspector = inspect(db.engine)
+    columns = {column["name"] for column in inspector.get_columns(User.__tablename__)}
+    if "vm_cache_days" not in columns:
+        with db.engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE user ADD COLUMN vm_cache_days INTEGER"
+            ))
+    with db.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE user SET vm_cache_days = :cache_days "
+                "WHERE vm_cache_days IS NULL "
+                "OR vm_cache_days < :minimum "
+                "OR vm_cache_days > :maximum"
+            ),
+            {
+                "cache_days": DEFAULT_VM_CACHE_DAYS,
+                "minimum": MIN_VM_CACHE_DAYS,
+                "maximum": MAX_VM_CACHE_DAYS,
+            },
+        )
+
+
 def mark_interrupted_operations():
     now = datetime.utcnow()
     stale_operations = OperationLog.query.filter(OperationLog.status.in_(ACTIVE_TASK_STATUSES)).all()
@@ -266,6 +402,10 @@ def ensure_database_schema():
     with app.app_context():
         db.create_all()
         migrate_credential_updated_at()
+        migrate_credential_cost_api_status()
+        migrate_user_timezone()
+        migrate_user_default_vm_script()
+        migrate_user_vm_cache_days()
         migrate_credential_secrets()
         mark_interrupted_operations()
 
@@ -284,6 +424,184 @@ def azure_credential(credential_record):
         credential_record.client_id,
         credential_record.get_client_secret(),
     )
+
+
+def clear_cost_cache(credential_id):
+    with cost_cache_lock:
+        cost_cache.pop(credential_id, None)
+        cost_rate_limit_cooldowns.pop(credential_id, None)
+
+
+def clear_vm_cache(credential_id):
+    with vm_cache_lock:
+        vm_cache.pop(credential_id, None)
+
+
+def vm_query_lock(credential_id):
+    with vm_cache_lock:
+        return vm_query_locks.setdefault(credential_id, Lock())
+
+
+def vm_cache_signature(credential_record):
+    return (
+        credential_record.client_id,
+        credential_record.tenant_id,
+        credential_record.subscription_id,
+    )
+
+
+def cached_vm_list(credential_record, now, cache_seconds):
+    signature = vm_cache_signature(credential_record)
+    with vm_cache_lock:
+        cached = vm_cache.get(credential_record.id)
+        if not cached or cached["signature"] != signature:
+            return None
+        if now - cached["created_at"] >= cache_seconds:
+            vm_cache.pop(credential_record.id, None)
+            return None
+        return cached["vms"]
+
+
+def get_cached_vm_list(credential_record, cache_days, force_refresh=False):
+    cache_seconds = cache_days * SECONDS_PER_DAY
+    if not force_refresh:
+        cached = cached_vm_list(credential_record, time.monotonic(), cache_seconds)
+        if cached is not None:
+            return cached
+
+    with vm_query_lock(credential_record.id):
+        if force_refresh:
+            clear_vm_cache(credential_record.id)
+        else:
+            cached = cached_vm_list(credential_record, time.monotonic(), cache_seconds)
+            if cached is not None:
+                return cached
+
+        credential = azure_credential(credential_record)
+        vms = function.list_vms(credential_record.subscription_id, credential)
+        with vm_cache_lock:
+            vm_cache[credential_record.id] = {
+                "signature": vm_cache_signature(credential_record),
+                "created_at": time.monotonic(),
+                "vms": vms,
+            }
+        return vms
+
+
+def cost_query_lock(credential_id):
+    with cost_cache_lock:
+        return cost_query_locks.setdefault(credential_id, Lock())
+
+
+def cost_cache_signature(credential_record):
+    return (
+        credential_record.client_id,
+        credential_record.tenant_id,
+        credential_record.subscription_id,
+    )
+
+
+def cached_cost_overview(credential_record, now, allow_expired=False):
+    signature = cost_cache_signature(credential_record)
+    with cost_cache_lock:
+        cached = cost_cache.get(credential_record.id)
+        if not cached or cached["signature"] != signature:
+            return None
+        if not allow_expired and now - cached["created_at"] >= COST_CACHE_SECONDS:
+            return None
+        return cached["overview"]
+
+
+def rate_limit_remaining(credential_id, now):
+    with cost_cache_lock:
+        cooldown_until = cost_rate_limit_cooldowns.get(credential_id, 0)
+        if cooldown_until <= now:
+            cost_rate_limit_cooldowns.pop(credential_id, None)
+            return 0
+        return max(1, ceil(cooldown_until - now))
+
+
+def stale_cost_overview(overview, retry_after):
+    stale = dict(overview)
+    stale["warnings"] = list(overview.get("warnings", [])) + [
+        "Azure 费用接口正在限流，当前显示缓存数据，可在 {} 秒后刷新".format(retry_after)
+    ]
+    stale["is_stale"] = True
+    return stale
+
+
+def get_cached_cost_overview(credential_record, force_refresh=False):
+    now = time.monotonic()
+    cached = cached_cost_overview(credential_record, now)
+    if cached is not None and not force_refresh:
+        return cached
+
+    retry_after = rate_limit_remaining(credential_record.id, now)
+    if retry_after:
+        stale = cached_cost_overview(credential_record, now, allow_expired=True)
+        if stale is not None:
+            return stale_cost_overview(stale, retry_after)
+        raise cost_management.CostManagementError(
+            "Azure 费用接口正在限流，请在 {} 秒后重试".format(retry_after),
+            status_code=429,
+            error_code="429",
+            retry_after=retry_after,
+        )
+
+    with cost_query_lock(credential_record.id):
+        now = time.monotonic()
+        cached = cached_cost_overview(credential_record, now)
+        if cached is not None and not force_refresh:
+            return cached
+        retry_after = rate_limit_remaining(credential_record.id, now)
+        if retry_after:
+            stale = cached_cost_overview(credential_record, now, allow_expired=True)
+            if stale is not None:
+                return stale_cost_overview(stale, retry_after)
+            raise cost_management.CostManagementError(
+                "Azure 费用接口正在限流，请在 {} 秒后重试".format(retry_after),
+                status_code=429,
+                error_code="429",
+                retry_after=retry_after,
+            )
+
+        credential = azure_credential(credential_record)
+        try:
+            overview = cost_management.get_cost_overview(
+                credential_record.subscription_id,
+                credential,
+            )
+        except cost_management.CostManagementError as error:
+            if error.status_code != 429:
+                raise
+            cooldown = max(
+                error.retry_after or COST_RATE_LIMIT_COOLDOWN_SECONDS,
+                COST_RATE_LIMIT_COOLDOWN_SECONDS,
+            )
+            with cost_cache_lock:
+                cost_rate_limit_cooldowns[credential_record.id] = time.monotonic() + cooldown
+            stale = cached_cost_overview(
+                credential_record,
+                time.monotonic(),
+                allow_expired=True,
+            )
+            if stale is not None:
+                return stale_cost_overview(stale, cooldown)
+            raise cost_management.CostManagementError(
+                "Azure 费用接口正在限流，请在 {} 秒后重试".format(cooldown),
+                status_code=429,
+                error_code=error.error_code,
+                retry_after=cooldown,
+            ) from error
+
+        with cost_cache_lock:
+            cost_rate_limit_cooldowns.pop(credential_record.id, None)
+            cost_cache[credential_record.id] = {
+                "signature": cost_cache_signature(credential_record),
+                "created_at": time.monotonic(),
+                "overview": overview,
+            }
+        return overview
 
 
 def validate_uuid(value, label, errors):
@@ -354,6 +672,7 @@ def run_operation(log_id, credential_id, operation, args):
             app.logger.exception("任务日志 %s 执行失败", log_id)
             update_operation_log(log_id, "失败", friendly_error_message(error), finished=True)
         else:
+            clear_vm_cache(credential_id)
             update_operation_log(log_id, "成功", success_detail or "操作已完成", finished=True)
         finally:
             db.session.remove()
@@ -369,8 +688,7 @@ def queue_operation(credential_record, action, target, operation, args):
     return log_id
 
 
-def create_vm_operation(subscription_id, credential, name, location, username, password, size, os_name, custom,
-                        accelerated_networking, disk, spot):
+def create_vm_operation(subscription_id, credential, name, location, username, password, size, os_name, custom, disk):
     function.create_resource_group(subscription_id, credential, name, location)
     function.create_or_update_vm(
         subscription_id,
@@ -382,9 +700,7 @@ def create_vm_operation(subscription_id, credential, name, location, username, p
         size,
         os_name,
         custom,
-        accelerated_networking,
         disk,
-        spot,
     )
     return "VM 登录凭据：用户名 {}，密码 {}".format(username, password)
 
@@ -418,9 +734,7 @@ def vm_form_data(form):
         "count": form.get("count", "1"),
         "os": form.get("os", ""),
         "custom": form.get("custom", "").strip(),
-        "acc": form.get("acc", "False"),
         "disk": form.get("disk", ""),
-        "spot": form.get("spot", "False"),
     }
     errors = []
     try:
@@ -433,7 +747,7 @@ def vm_form_data(form):
     if not names or any(not validate_vm_name(name, values["os"]) for name in names):
         errors.append("VM 名称必须以字母开头，只能包含字母、数字和连字符，并符合系统长度限制")
     if values["location"] not in dict(VM_LOCATIONS):
-        errors.append("区域选项无效")
+        errors.append("位置选项无效")
     if values["size"] not in dict(VM_SIZES):
         errors.append("机型选项无效")
     if values["os"] not in function.IMAGES:
@@ -446,21 +760,22 @@ def vm_form_data(form):
         disk = 0
     if disk not in DISK_SIZES:
         errors.append("系统磁盘大小无效")
-    if values["acc"] not in ("True", "False"):
-        errors.append("加速网络选项无效")
-    if values["spot"] not in ("True", "False"):
-        errors.append("Spot 选项无效")
-    if values["custom"]:
-        try:
-            custom_data = base64.b64decode(values["custom"], validate=True)
-            if len(custom_data) > 65535:
-                errors.append("自定义脚本解码后不能超过 64 KB")
-        except (binascii.Error, ValueError):
-            errors.append("自定义脚本不是有效的 Base64 内容")
+    validate_base64_script(values["custom"], errors, "自定义脚本")
     values["count"] = count
     values["disk"] = disk
     values["names"] = names
     return values, errors
+
+
+def validate_base64_script(value, errors, label):
+    if not value:
+        return
+    try:
+        decoded = base64.b64decode(value, validate=True)
+        if len(decoded) > 65535:
+            errors.append("{}解码后不能超过 64 KB".format(label))
+    except (binascii.Error, ValueError):
+        errors.append("{}不是有效的 Base64 内容".format(label))
 
 
 def validate_vm_target(form):
@@ -472,10 +787,12 @@ def validate_vm_target(form):
 
 
 def create_vm_template(credential_record, values=None, errors=None):
+    if values is None:
+        values = {"custom": current_user.get_default_vm_script()}
     return render_template(
         "createvm.html",
         credential=credential_record,
-        values=values or {},
+        values=values,
         errors=errors or [],
         locations=VM_LOCATIONS,
         sizes=VM_SIZES,
@@ -497,6 +814,13 @@ def parse_page_size(value, default):
     except (TypeError, ValueError):
         return default
     return page_size if page_size in PAGE_SIZE_OPTIONS else default
+
+
+def user_vm_cache_days():
+    cache_days = getattr(current_user, "vm_cache_days", DEFAULT_VM_CACHE_DAYS)
+    if MIN_VM_CACHE_DAYS <= cache_days <= MAX_VM_CACHE_DAYS:
+        return cache_days
+    return DEFAULT_VM_CACHE_DAYS
 
 
 def account_values(credential_record=None):
@@ -563,7 +887,7 @@ def admin(username, password):
     """Create or update the administrator."""
     user = User.query.first()
     if user is None:
-        user = User(username=username, name="Admin")
+        user = User(username=username)
         db.session.add(user)
     else:
         user.username = username
@@ -594,6 +918,102 @@ def logout():
     logout_user()
     flash("已退出登录")
     return redirect(url_for("login"))
+
+
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+def system_settings():
+    values = {
+        "username": current_user.username or "",
+        "timezone": user_timezone_name(current_user),
+        "vm_cache_days": user_vm_cache_days(),
+        "default_vm_script": current_user.get_default_vm_script(),
+    }
+    errors = {"general": [], "account": []}
+    active_section = (
+        request.form.get("section", "")
+        if request.method == "POST"
+        else request.args.get("tab", "general")
+    )
+    if active_section not in errors:
+        active_section = "general"
+    if request.method == "POST":
+        if active_section == "general":
+            values["timezone"] = request.form.get("timezone", "").strip()
+            values["vm_cache_days"] = request.form.get(
+                "vm_cache_days", str(values["vm_cache_days"])
+            ).strip()
+            values["default_vm_script"] = request.form.get(
+                "default_vm_script", values["default_vm_script"]
+            ).strip()
+            if values["timezone"] not in dict(TIMEZONE_OPTIONS):
+                errors["general"].append("时区选项无效")
+            try:
+                cache_days = int(values["vm_cache_days"])
+            except (TypeError, ValueError):
+                cache_days = 0
+            if not MIN_VM_CACHE_DAYS <= cache_days <= MAX_VM_CACHE_DAYS:
+                errors["general"].append(
+                    "VM 列表缓存时间必须在 {} 到 {} 天之间".format(
+                        MIN_VM_CACHE_DAYS,
+                        MAX_VM_CACHE_DAYS,
+                    )
+                )
+            validate_base64_script(
+                values["default_vm_script"],
+                errors["general"],
+                "默认 VM 脚本",
+            )
+            if not errors["general"]:
+                current_user.timezone = values["timezone"]
+                current_user.vm_cache_days = cache_days
+                current_user.set_default_vm_script(values["default_vm_script"])
+                db.session.commit()
+                flash("常规设置已更新")
+                return redirect(url_for("system_settings", tab="general"))
+        elif active_section == "account":
+            values["username"] = request.form.get("username", "").strip()
+            current_password = request.form.get("current_password", "")
+            new_password = request.form.get("new_password", "")
+            password_confirmation = request.form.get("password_confirmation", "")
+            username_changed = values["username"] != current_user.username
+            password_changed = bool(new_password or password_confirmation)
+
+            if not values["username"]:
+                errors["account"].append("登录账号名不能为空")
+            elif len(values["username"]) > 20:
+                errors["account"].append("登录账号名不能超过 20 个字符")
+            elif User.query.filter(
+                User.username == values["username"],
+                User.id != current_user.id,
+            ).first() is not None:
+                errors["account"].append("登录账号名已存在")
+            if username_changed or password_changed:
+                if not current_password or not current_user.validate_password(current_password):
+                    errors["account"].append("当前密码不正确")
+            if password_changed:
+                if len(new_password) < 8:
+                    errors["account"].append("新密码不能少于 8 个字符")
+                if new_password != password_confirmation:
+                    errors["account"].append("两次输入的新密码不一致")
+
+            if not errors["account"]:
+                current_user.username = values["username"]
+                if password_changed:
+                    current_user.set_password(new_password)
+                db.session.commit()
+                flash("账号安全设置已更新")
+                return redirect(url_for("system_settings", tab="account"))
+        else:
+            errors["account"].append("设置类型无效，请刷新页面后重试")
+
+    return render_template(
+        "settings.html",
+        values=values,
+        errors=errors,
+        active_tab=active_section,
+        timezone_options=TIMEZONE_OPTIONS,
+    )
 
 
 @app.route("/")
@@ -684,13 +1104,18 @@ def account_edit(credential_id):
             "edit", page, page_size, credential_record, values=values, errors=errors
         )
         return render_account_index(page, modal_state, page_size=page_size)
+    subscription_changed = values["subscription_id"] != credential_record.subscription_id
     credential_record.account = values["account"]
     credential_record.client_id = values["client_id"]
     credential_record.tenant_id = values["tenant_id"]
     credential_record.subscription_id = values["subscription_id"]
+    if subscription_changed:
+        credential_record.cost_api_status = None
     if values["client_secret"]:
         credential_record.set_client_secret(client_secret)
     db.session.commit()
+    clear_cost_cache(credential_record.id)
+    clear_vm_cache(credential_record.id)
     flash("管理账户已更新并通过 Azure 身份验证")
     return redirect(url_for("index", page=page, per_page=page_size))
 
@@ -701,6 +1126,8 @@ def account_delete(credential_id):
     credential_record = Credential.query.get_or_404(credential_id)
     db.session.delete(credential_record)
     db.session.commit()
+    clear_cost_cache(credential_id)
+    clear_vm_cache(credential_id)
     flash("本地管理账户已删除，Azure 资源不受影响")
     return redirect(url_for(
         "index",
@@ -732,9 +1159,7 @@ def create_vm(credential_id):
                     values["size"],
                     values["os"],
                     values["custom"],
-                    values["acc"],
                     values["disk"],
-                    values["spot"],
                 ),
             )
         flash("已提交 {} 个 VM 创建任务".format(len(values["names"])))
@@ -756,14 +1181,83 @@ def vm_list_data(credential_id):
     if credential_record is None:
         return jsonify(error="账号不存在或已删除"), 404
     try:
-        credential = azure_credential(credential_record)
-        vms = function.list_vms(credential_record.subscription_id, credential)
+        vms = get_cached_vm_list(
+            credential_record,
+            user_vm_cache_days(),
+            force_refresh=request.args.get("refresh") == "1",
+        )
     except Exception as error:
         app.logger.exception("读取账号 %s 的 VM 列表失败", credential_record.id)
         return jsonify(error=friendly_error_message(error)), 502
     return jsonify(
         html=render_template("_vm_rows.html", vms=vms, credential=credential_record),
         count=len(vms),
+    )
+
+
+@app.route("/costs")
+@login_required
+def cost_overview():
+    credentials = Credential.query.order_by(Credential.id.asc()).all()
+    selected_credential = None
+    credential_id = request.args.get("credential_id", "").strip()
+    if credential_id.isdigit():
+        selected_credential = Credential.query.get_or_404(int(credential_id))
+    elif credentials:
+        selected_credential = credentials[0]
+    return render_template(
+        "costs.html",
+        credentials=credentials,
+        selected_credential=selected_credential,
+    )
+
+
+@app.route("/account/<int:credential_id>/costs/data")
+@login_required
+def cost_overview_data(credential_id):
+    credential_record = Credential.query.get(credential_id)
+    if credential_record is None:
+        return jsonify(error="账号不存在或已删除"), 404
+    force_refresh = request.args.get("refresh") == "1"
+    if credential_record.cost_api_status == COST_API_UNSUPPORTED and not force_refresh:
+        return jsonify(html=render_template("_cost_unavailable.html"))
+    try:
+        overview = get_cached_cost_overview(
+            credential_record,
+            force_refresh=force_refresh,
+        )
+    except cost_management.CostManagementUnsupportedError as error:
+        app.logger.info(
+            "账号 %s 的订阅报价不支持 Cost Management API，code=%s",
+            credential_record.id,
+            error.error_code,
+        )
+        if credential_record.cost_api_status != COST_API_UNSUPPORTED:
+            credential_record.cost_api_status = COST_API_UNSUPPORTED
+            db.session.commit()
+        return jsonify(html=render_template("_cost_unavailable.html"))
+    except cost_management.CostManagementError as error:
+        app.logger.warning(
+            "读取账号 %s 的费用失败，HTTP=%s，code=%s",
+            credential_record.id,
+            error.status_code,
+            error.error_code,
+        )
+        response_status = 429 if error.status_code == 429 else 502
+        return jsonify(error=str(error), retry_after=error.retry_after), response_status
+    except Exception as error:
+        app.logger.exception("读取账号 %s 的费用失败", credential_record.id)
+        return jsonify(error=friendly_error_message(error)), 502
+    if credential_record.cost_api_status != COST_API_SUPPORTED:
+        credential_record.cost_api_status = COST_API_SUPPORTED
+    if db.session.is_modified(credential_record):
+        db.session.commit()
+    return jsonify(
+        html=render_template(
+            "_cost_overview.html",
+            overview=overview,
+            credential=credential_record,
+        )
     )
 
 
@@ -812,10 +1306,10 @@ def delete_vm(credential_id):
     credential_record = Credential.query.get_or_404(credential_id)
     resource_group, vm_name = validate_vm_target(request.form)
     queue_operation(
-        credential_record, "删除资源组", "{}/{}".format(resource_group, vm_name), function.delete_vm,
+        credential_record, "删除 VM", vm_name, function.delete_vm,
         (resource_group,),
     )
-    flash("资源组删除任务已提交")
+    flash("VM 删除任务已提交")
     return redirect(url_for("index"))
 
 
@@ -829,7 +1323,7 @@ def operation_logs():
         page = max(1, int(request.args.get("page", "1")))
     except ValueError:
         page = 1
-    selected_page_size = parse_page_size(request.args.get("per_page"), LOG_PAGE_SIZE)
+    selected_page_size = parse_page_size(request.args.get("per_page"), ACCOUNT_PAGE_SIZE)
 
     query = OperationLog.query
     if status in TASK_STATUSES:
