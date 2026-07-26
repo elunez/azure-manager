@@ -439,16 +439,16 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    var failureDetailModal = document.getElementById("failure-detail-modal");
-    if (failureDetailModal) {
-        failureDetailModal.addEventListener("show.bs.modal", function (event) {
+    var taskDetailModal = document.getElementById("task-detail-modal");
+    if (taskDetailModal) {
+        taskDetailModal.addEventListener("show.bs.modal", function (event) {
             var trigger = event.relatedTarget;
             if (!trigger || trigger.disabled) {
                 event.preventDefault();
                 return;
             }
-            document.getElementById("failure-detail-content").textContent =
-                trigger.dataset.failureDetail || "未知失败原因";
+            document.getElementById("task-detail-content").textContent =
+                trigger.dataset.taskDetail || "暂无任务详情";
         });
     }
 });

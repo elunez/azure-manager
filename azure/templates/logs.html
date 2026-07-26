@@ -55,10 +55,10 @@
             <col class="log-duration-col">
             <col class="log-time-col">
             <col class="log-status-col">
-            <col class="log-failure-col">
+            <col class="log-detail-col">
         </colgroup>
         <thead>
-            <tr><th>账号</th><th>操作</th><th>VM名称</th><th>耗时/秒</th><th>时间</th><th>状态</th><th>失败原因</th></tr>
+            <tr><th>账号</th><th>操作</th><th>VM名称</th><th>耗时/秒</th><th>时间</th><th>状态</th><th>任务详情</th></tr>
         </thead>
         <tbody>
             {% for log in pagination.items %}
@@ -73,14 +73,10 @@
                 <td class="text-nowrap">{{ log.duration_seconds }}</td>
                 <td class="text-body-secondary text-nowrap">{{ log.created_at|local_datetime }}</td>
                 <td><span class="badge status-badge status-{{ log.status }}">{{ log.status }}</span></td>
-                <td class="failure-column">
-                    <button class="btn btn-sm {{ 'btn-danger' if log.status == '失败' else 'btn-secondary' }}" type="button"
-                            {% if log.status == '失败' %}
-                            data-bs-toggle="modal" data-bs-target="#failure-detail-modal"
-                            data-failure-detail="{{ log.detail or '未知失败原因' }}"
-                            {% else %}
-                            disabled aria-disabled="true"
-                            {% endif %}>
+                <td class="task-detail-column">
+                    <button class="btn btn-sm {{ 'btn-danger' if log.status == '失败' else ('btn-primary' if log.status == '成功' else 'btn-secondary') }}" type="button"
+                            data-bs-toggle="modal" data-bs-target="#task-detail-modal"
+                            data-task-detail="{{ log.detail or '暂无任务详情' }}">
                         <i class="bi bi-eye" aria-hidden="true"></i>
                         查看
                     </button>
@@ -151,15 +147,15 @@
     </div>
 </div>
 
-<div class="modal fade" id="failure-detail-modal" tabindex="-1" aria-labelledby="failure-detail-title" aria-hidden="true">
+<div class="modal fade" id="task-detail-modal" tabindex="-1" aria-labelledby="task-detail-title" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h1 class="modal-title fs-5" id="failure-detail-title">失败详情</h1>
+                <h1 class="modal-title fs-5" id="task-detail-title">任务详情</h1>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
             </div>
             <div class="modal-body">
-                <pre class="failure-detail" id="failure-detail-content"></pre>
+                <pre class="task-detail" id="task-detail-content"></pre>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-light border" data-bs-dismiss="modal">关闭</button>

@@ -8,7 +8,7 @@ import time
 import uuid
 from math import ceil
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -19,6 +19,7 @@ from flask_login import LoginManager, UserMixin, current_user, login_required, l
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, or_, text
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import function
 import cost_management
@@ -75,6 +76,15 @@ DEFAULT_VM_CACHE_DAYS = 1
 MIN_VM_CACHE_DAYS = 1
 MAX_VM_CACHE_DAYS = 30
 SECONDS_PER_DAY = 24 * 60 * 60
+MAX_REQUEST_BYTES = 256 * 1024
+SESSION_LIFETIME_HOURS = 8
+LOGIN_IP_FAILURE_LIMIT = 5
+LOGIN_IP_WINDOW_SECONDS = 5 * 60
+LOGIN_ACCOUNT_FAILURE_LIMIT = 10
+LOGIN_ACCOUNT_WINDOW_SECONDS = 15 * 60
+LOGIN_LOCK_SECONDS = 15 * 60
+LOGIN_ATTEMPT_MAX_KEYS = 5000
+LOGIN_AUDIT_MAX_RECORDS = 2000
 TASK_STATUSES = ("排队中", "执行中", "成功", "失败", "中断")
 ACTIVE_TASK_STATUSES = ("排队中", "执行中")
 RESOURCE_GROUP_PATTERN = re.compile(r"^[A-Za-z0-9_.()\-]{1,90}$")
@@ -85,7 +95,16 @@ VM_PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!@#%_-"
 master_key, master_key_source, generated_key_path = load_master_key()
 credential_cipher = CredentialCipher(master_key)
 
+
+def environment_flag(name, default):
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 database_uri = os.environ.get(
     "AZURE_MANAGER_DATABASE_URI",
     "sqlite:///{}".format(os.path.join(app.root_path, "database.db")),
@@ -93,6 +112,14 @@ database_uri = os.environ.get(
 app.config["SQLALCHEMY_DATABASE_URI"] = database_uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = derive_session_key(master_key)
+app.config["SESSION_COOKIE_SECURE"] = environment_flag(
+    "AZURE_MANAGER_SECURE_COOKIE",
+    True,
+)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=SESSION_LIFETIME_HOURS)
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
@@ -104,6 +131,9 @@ cost_cache_lock = Lock()
 vm_cache = {}
 vm_query_locks = {}
 vm_cache_lock = Lock()
+login_ip_attempts = {}
+login_account_attempts = {}
+login_attempts_lock = Lock()
 COST_CACHE_SECONDS = 1800
 COST_RATE_LIMIT_COOLDOWN_SECONDS = 60
 COST_API_SUPPORTED = "supported"
@@ -124,18 +154,26 @@ TIMEZONE_OPTIONS = (
 )
 
 
-def friendly_error_message(error):
+class ErrorReferenceException(RuntimeError):
+    """携带已记录的公开错误编号，避免异常上抛时重复生成编号。"""
+
+
+def friendly_error_message(error, context="操作失败"):
     """将常见 Azure 异常转换为可直接展示的中文提示。"""
+    if isinstance(error, ErrorReferenceException):
+        return str(error)
+
     error_text = str(error)
+    message = None
     if "AADSTS7000222" in error_text:
-        return "Azure 客户端密钥已过期，请编辑该管理账户并更新凭据"
-    if "AADSTS7000215" in error_text:
-        return "Azure 客户端密钥无效，请确认填写的是密钥值而不是密钥 ID"
-    if "AADSTS700016" in error_text:
-        return "Azure 应用不存在或租户不匹配，请检查客户端 ID 和租户 ID"
-    if isinstance(error, ClientAuthenticationError):
-        return "Azure 身份验证失败，请检查客户端 ID、客户端密钥和租户 ID"
-    if isinstance(error, HttpResponseError):
+        message = "Azure 客户端密钥已过期，请编辑该管理账户并更新凭据"
+    elif "AADSTS7000215" in error_text:
+        message = "Azure 客户端密钥无效，请确认填写的是密钥值而不是密钥 ID"
+    elif "AADSTS700016" in error_text:
+        message = "Azure 应用不存在或租户不匹配，请检查客户端 ID 和租户 ID"
+    elif isinstance(error, ClientAuthenticationError):
+        message = "Azure 身份验证失败，请检查客户端 ID、客户端密钥和租户 ID"
+    elif isinstance(error, HttpResponseError):
         response = getattr(error, "response", None)
         status_code = getattr(error, "status_code", None) or getattr(response, "status_code", None)
         messages = {
@@ -145,8 +183,20 @@ def friendly_error_message(error):
             409: "Azure 资源当前状态不允许此操作，请稍后重试",
             429: "Azure 请求过于频繁，请稍后重试",
         }
-        return messages.get(status_code, "Azure 操作失败，请查看应用日志了解详细原因")
-    return str(error) or error.__class__.__name__
+        message = messages.get(status_code, "Azure 操作失败，请查看应用日志了解详细原因")
+
+    if message is not None:
+        app.logger.warning("%s: %s", context, error)
+        return message
+
+    error_reference = uuid.uuid4().hex[:10].upper()
+    app.logger.error(
+        "%s，错误编号=%s",
+        context,
+        error_reference,
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    return "操作失败，请联系管理员并提供错误编号：{}".format(error_reference)
 
 
 def csrf_token():
@@ -204,8 +254,7 @@ def validate_csrf_token():
 @app.errorhandler(ClientAuthenticationError)
 @app.errorhandler(HttpResponseError)
 def azure_request_failed(error):
-    app.logger.warning("Azure 请求失败: %s", error)
-    flash(friendly_error_message(error))
+    flash(friendly_error_message(error, context="Azure 请求失败"))
     return redirect(url_for("index"))
 
 
@@ -224,9 +273,19 @@ def page_not_found(error):
     return render_template("404.html"), 404
 
 
+@app.errorhandler(413)
+def request_too_large(error):
+    return render_template(
+        "500.html",
+        message="请求内容过大，不能超过 256 KB",
+    ), 413
+
+
 @app.errorhandler(500)
 def internal_server_error(error):
-    return render_template("500.html"), 500
+    original_error = getattr(error, "original_exception", None) or error
+    message = friendly_error_message(original_error, context="未处理请求异常")
+    return render_template("500.html", message=message), 500
 
 
 class Credential(db.Model):
@@ -289,6 +348,16 @@ class OperationLog(db.Model):
     def duration_seconds(self):
         end_time = self.finished_at or datetime.utcnow()
         return max(0, int((end_time - self.created_at).total_seconds()))
+
+
+class LoginAudit(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(120), nullable=False)
+    ip_address = db.Column(db.String(45), nullable=False)
+    status = db.Column(db.String(20), nullable=False)
+    detail = db.Column(db.String(120), nullable=False)
+    user_agent = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 def migrate_credential_secrets():
@@ -669,8 +738,12 @@ def run_operation(log_id, credential_id, operation, args):
             credential = azure_credential(credential_record)
             success_detail = operation(credential_record.subscription_id, credential, *args)
         except Exception as error:
-            app.logger.exception("任务日志 %s 执行失败", log_id)
-            update_operation_log(log_id, "失败", friendly_error_message(error), finished=True)
+            update_operation_log(
+                log_id,
+                "失败",
+                friendly_error_message(error, context="任务日志 {} 执行失败".format(log_id)),
+                finished=True,
+            )
         else:
             clear_vm_cache(credential_id)
             update_operation_log(log_id, "成功", success_detail or "操作已完成", finished=True)
@@ -683,8 +756,17 @@ def queue_operation(credential_record, action, target, operation, args):
     try:
         task_executor.submit(run_operation, log_id, credential_record.id, operation, args)
     except Exception as error:
-        update_operation_log(log_id, "失败", str(error), finished=True)
-        raise
+        public_message = friendly_error_message(
+            error,
+            context="任务日志 {} 入队失败".format(log_id),
+        )
+        update_operation_log(
+            log_id,
+            "失败",
+            public_message,
+            finished=True,
+        )
+        raise ErrorReferenceException(public_message) from error
     return log_id
 
 
@@ -870,6 +952,141 @@ def render_account_index(page=1, modal_state=None, status_code=200, page_size=AC
     ), status_code
 
 
+def login_client_ip():
+    return (request.remote_addr or "未知").strip()[:45]
+
+
+def _login_attempt_state(states, key, now, window_seconds):
+    state = states.get(key)
+    if state is None:
+        if len(states) >= LOGIN_ATTEMPT_MAX_KEYS:
+            stale_keys = [
+                state_key
+                for state_key, existing_state in states.items()
+                if existing_state["locked_until"] <= now
+                and not any(
+                    now - timestamp < window_seconds
+                    for timestamp in existing_state["failures"]
+                )
+            ]
+            for stale_key in stale_keys:
+                states.pop(stale_key, None)
+            while len(states) >= LOGIN_ATTEMPT_MAX_KEYS:
+                states.pop(next(iter(states)))
+        state = {"failures": [], "locked_until": 0}
+        states[key] = state
+    state["failures"] = [
+        timestamp
+        for timestamp in state["failures"]
+        if now - timestamp < window_seconds
+    ]
+    if state["locked_until"] <= now:
+        state["locked_until"] = 0
+    return state
+
+
+def login_retry_after(ip_address, account_key, now=None):
+    current_time = time.monotonic() if now is None else now
+    retry_after = 0
+    with login_attempts_lock:
+        ip_state = _login_attempt_state(
+            login_ip_attempts,
+            ip_address,
+            current_time,
+            LOGIN_IP_WINDOW_SECONDS,
+        )
+        retry_after = max(retry_after, ceil(ip_state["locked_until"] - current_time))
+        if account_key:
+            account_state = _login_attempt_state(
+                login_account_attempts,
+                account_key,
+                current_time,
+                LOGIN_ACCOUNT_WINDOW_SECONDS,
+            )
+            retry_after = max(
+                retry_after,
+                ceil(account_state["locked_until"] - current_time),
+            )
+    return max(0, retry_after)
+
+
+def register_login_failure(ip_address, account_key, now=None):
+    current_time = time.monotonic() if now is None else now
+    retry_after = 0
+    with login_attempts_lock:
+        ip_state = _login_attempt_state(
+            login_ip_attempts,
+            ip_address,
+            current_time,
+            LOGIN_IP_WINDOW_SECONDS,
+        )
+        ip_state["failures"].append(current_time)
+        if len(ip_state["failures"]) >= LOGIN_IP_FAILURE_LIMIT:
+            ip_state["locked_until"] = current_time + LOGIN_LOCK_SECONDS
+        retry_after = max(retry_after, ceil(ip_state["locked_until"] - current_time))
+
+        if account_key:
+            account_state = _login_attempt_state(
+                login_account_attempts,
+                account_key,
+                current_time,
+                LOGIN_ACCOUNT_WINDOW_SECONDS,
+            )
+            account_state["failures"].append(current_time)
+            if len(account_state["failures"]) >= LOGIN_ACCOUNT_FAILURE_LIMIT:
+                account_state["locked_until"] = current_time + LOGIN_LOCK_SECONDS
+            retry_after = max(
+                retry_after,
+                ceil(account_state["locked_until"] - current_time),
+            )
+    return max(0, retry_after)
+
+
+def clear_login_failures(ip_address, account_key):
+    with login_attempts_lock:
+        login_ip_attempts.pop(ip_address, None)
+        if account_key:
+            login_account_attempts.pop(account_key, None)
+
+
+def record_login_audit(username, ip_address, status, detail):
+    try:
+        db.session.add(LoginAudit(
+            username=(username or "未填写")[:120],
+            ip_address=ip_address[:45],
+            status=status[:20],
+            detail=detail[:120],
+            user_agent=request.headers.get("User-Agent", "未知")[:255],
+        ))
+        db.session.commit()
+        overflow_ids = [
+            audit_id
+            for audit_id, in (
+                LoginAudit.query
+                .with_entities(LoginAudit.id)
+                .order_by(LoginAudit.id.desc())
+                .offset(LOGIN_AUDIT_MAX_RECORDS)
+                .all()
+            )
+        ]
+        if overflow_ids:
+            LoginAudit.query.filter(LoginAudit.id.in_(overflow_ids)).delete(
+                synchronize_session=False
+            )
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("写入登录审计失败")
+
+
+def locked_login_response(retry_after):
+    minutes = max(1, ceil(retry_after / 60))
+    flash("登录尝试过多，请在 {} 分钟后重试".format(minutes))
+    response = app.make_response((render_template("login.html"), 429))
+    response.headers["Retry-After"] = str(retry_after)
+    return response
+
+
 @app.cli.command()
 @click.option("--drop", is_flag=True, help="Create after drop.")
 def initdb(drop):
@@ -901,21 +1118,36 @@ def login():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
     if request.method == "POST":
-        username = request.form.get("username", "")
+        username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         user = User.query.first()
-        if user is not None and username == user.username and user.validate_password(password):
+        ip_address = login_client_ip()
+        account_key = user.username if user is not None and username == user.username else None
+        retry_after = login_retry_after(ip_address, account_key)
+        if retry_after:
+            record_login_audit(username, ip_address, "已拦截", "登录尝试过多")
+            return locked_login_response(retry_after)
+        if account_key and user.validate_password(password):
+            clear_login_failures(ip_address, account_key)
+            record_login_audit(username, ip_address, "成功", "登录成功")
+            session.clear()
             login_user(user)
+            session.permanent = True
             flash("登录成功")
             return redirect(url_for("index"))
+        retry_after = register_login_failure(ip_address, account_key)
+        record_login_audit(username, ip_address, "失败", "用户名或密码错误")
+        if retry_after:
+            return locked_login_response(retry_after)
         flash("用户名或密码错误")
     return render_template("login.html")
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
+    session.clear()
     flash("已退出登录")
     return redirect(url_for("login"))
 
@@ -930,12 +1162,13 @@ def system_settings():
         "default_vm_script": current_user.get_default_vm_script(),
     }
     errors = {"general": [], "account": []}
+    valid_sections = {"general", "account", "audit"}
     active_section = (
         request.form.get("section", "")
         if request.method == "POST"
         else request.args.get("tab", "general")
     )
-    if active_section not in errors:
+    if active_section not in valid_sections:
         active_section = "general"
     if request.method == "POST":
         if active_section == "general":
@@ -1007,12 +1240,19 @@ def system_settings():
         else:
             errors["account"].append("设置类型无效，请刷新页面后重试")
 
+    audit_page = page_number(request.args.get("audit_page"))
+    audit_pagination = LoginAudit.query.order_by(LoginAudit.id.desc()).paginate(
+        page=audit_page,
+        per_page=ACCOUNT_PAGE_SIZE,
+        error_out=False,
+    )
     return render_template(
         "settings.html",
         values=values,
         errors=errors,
         active_tab=active_section,
         timezone_options=TIMEZONE_OPTIONS,
+        audit_pagination=audit_pagination,
     )
 
 
@@ -1053,7 +1293,7 @@ def account_add():
             )
             function.validate_credential(values["subscription_id"], credential)
         except Exception as error:
-            errors.append(friendly_error_message(error))
+            errors.append(friendly_error_message(error, context="验证 Azure 管理账户失败"))
     page = page_number(request.form.get("page"))
     page_size = parse_page_size(request.form.get("per_page"), ACCOUNT_PAGE_SIZE)
     if errors:
@@ -1098,7 +1338,7 @@ def account_edit(credential_id):
             )
             function.validate_credential(values["subscription_id"], credential)
         except Exception as error:
-            errors.append(friendly_error_message(error))
+            errors.append(friendly_error_message(error, context="验证 Azure 管理账户失败"))
     if errors:
         modal_state = account_modal_state(
             "edit", page, page_size, credential_record, values=values, errors=errors
@@ -1187,8 +1427,10 @@ def vm_list_data(credential_id):
             force_refresh=request.args.get("refresh") == "1",
         )
     except Exception as error:
-        app.logger.exception("读取账号 %s 的 VM 列表失败", credential_record.id)
-        return jsonify(error=friendly_error_message(error)), 502
+        return jsonify(error=friendly_error_message(
+            error,
+            context="读取账号 {} 的 VM 列表失败".format(credential_record.id),
+        )), 502
     return jsonify(
         html=render_template("_vm_rows.html", vms=vms, credential=credential_record),
         count=len(vms),
@@ -1246,8 +1488,10 @@ def cost_overview_data(credential_id):
         response_status = 429 if error.status_code == 429 else 502
         return jsonify(error=str(error), retry_after=error.retry_after), response_status
     except Exception as error:
-        app.logger.exception("读取账号 %s 的费用失败", credential_record.id)
-        return jsonify(error=friendly_error_message(error)), 502
+        return jsonify(error=friendly_error_message(
+            error,
+            context="读取账号 {} 的费用失败".format(credential_record.id),
+        )), 502
     if credential_record.cost_api_status != COST_API_SUPPORTED:
         credential_record.cost_api_status = COST_API_SUPPORTED
     if db.session.is_modified(credential_record):
@@ -1364,4 +1608,4 @@ def operation_logs():
 
 
 if __name__ == "__main__":
-    app.run(port=8888, host="0.0.0.0")
+    app.run(port=18888, host="127.0.0.1")

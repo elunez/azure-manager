@@ -401,7 +401,7 @@ body {
   width: 100px;
 }
 
-.logs-table .log-failure-col {
+.logs-table .log-detail-col {
   width: 110px;
 }
 
@@ -638,11 +638,11 @@ body {
   border-color: #ead9a3;
 }
 
-.failure-column {
+.task-detail-column {
   white-space: nowrap;
 }
 
-.failure-detail {
+.task-detail {
   margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -881,6 +881,46 @@ body {
 .settings-tab-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.settings-audit-table {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.settings-audit-table table {
+  width: 100%;
+  min-width: 920px;
+  table-layout: fixed;
+}
+
+.settings-audit-time-col {
+  width: 210px;
+}
+
+.settings-audit-account-col {
+  width: 150px;
+}
+
+.settings-audit-ip-col {
+  width: 165px;
+}
+
+.settings-audit-result-col {
+  width: 110px;
+}
+
+.settings-audit-device-col {
+  width: auto;
+}
+
+.settings-audit-agent {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .create-vm-shell .form-control,

@@ -14,7 +14,7 @@
 <div class="app-page-header mb-4">
     <div>
         <h1 class="app-page-title">系统设置</h1>
-        <p class="app-page-subtitle">管理常规选项、VM 参数和账号安全</p>
+        <p class="app-page-subtitle">管理常规选项、账号安全和登录记录</p>
     </div>
 </div>
 
@@ -37,6 +37,15 @@
                         aria-controls="settings-account-pane" aria-selected="{{ 'true' if active_tab == 'account' else 'false' }}">
                     <i class="bi bi-shield-lock" aria-hidden="true"></i>
                     账号安全
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link {% if active_tab == 'audit' %}active{% endif %}" id="settings-audit-tab"
+                        data-bs-toggle="tab" data-bs-target="#settings-audit-pane" type="button" role="tab"
+                        data-settings-tab="audit"
+                        aria-controls="settings-audit-pane" aria-selected="{{ 'true' if active_tab == 'audit' else 'false' }}">
+                    <i class="bi bi-clock-history" aria-hidden="true"></i>
+                    登录记录
                 </button>
             </li>
         </ul>
@@ -116,6 +125,73 @@
                     <button class="btn btn-sm btn-primary" type="submit">保存账号安全设置</button>
                 </div>
             </form>
+        </div>
+
+        <div class="tab-pane fade {% if active_tab == 'audit' %}show active{% endif %}" id="settings-audit-pane"
+             role="tabpanel" aria-labelledby="settings-audit-tab" tabindex="0">
+            <div class="table-panel settings-audit-table">
+                <table class="table table-hover align-middle mb-0">
+                    <colgroup>
+                        <col class="settings-audit-time-col">
+                        <col class="settings-audit-account-col">
+                        <col class="settings-audit-ip-col">
+                        <col class="settings-audit-result-col">
+                        <col class="settings-audit-device-col">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>账号</th>
+                            <th>来源 IP</th>
+                            <th>结果</th>
+                            <th>设备信息</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for audit in audit_pagination.items %}
+                        <tr>
+                            <td class="text-body-secondary text-nowrap">{{ audit.created_at|local_datetime }}</td>
+                            <td>{{ audit.username }}</td>
+                            <td class="font-monospace text-nowrap">{{ audit.ip_address }}</td>
+                            <td>
+                                <span class="badge {{ 'text-bg-success' if audit.status == '成功' else ('text-bg-warning' if audit.status == '已拦截' else 'text-bg-danger') }}">
+                                    {{ audit.status }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="settings-audit-agent" title="{{ audit.user_agent }}">{{ audit.user_agent }}</span>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="empty-state">暂无登录记录</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if audit_pagination.pages > 1 %}
+            <nav class="mt-3" aria-label="登录记录分页">
+                <ul class="pagination pagination-sm justify-content-end mb-0">
+                    <li class="page-item {% if not audit_pagination.has_prev %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('system_settings', tab='audit', audit_page=audit_pagination.prev_num if audit_pagination.has_prev else 1) }}"
+                           aria-label="上一页">&laquo;</a>
+                    </li>
+                    {% for page_number in audit_pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+                        {% if page_number %}
+                        <li class="page-item {% if page_number == audit_pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('system_settings', tab='audit', audit_page=page_number) }}">{{ page_number }}</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                        {% endif %}
+                    {% endfor %}
+                    <li class="page-item {% if not audit_pagination.has_next %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('system_settings', tab='audit', audit_page=audit_pagination.next_num if audit_pagination.has_next else audit_pagination.pages) }}"
+                           aria-label="下一页">&raquo;</a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
         </div>
     </div>
 </section>

@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "azure"))
 os.environ["AZURE_MANAGER_MASTER_KEY"] = "test-master-key-for-isolated-app-tests-only"
 os.environ["AZURE_MANAGER_DATABASE_URI"] = "sqlite:///:memory:"
+os.environ["AZURE_MANAGER_SECURE_COOKIE"] = "false"
 
 import app as app_module  # noqa: E402
 from azure.core.exceptions import ClientAuthenticationError  # noqa: E402
@@ -23,12 +24,17 @@ from azure.core.exceptions import ClientAuthenticationError  # noqa: E402
 
 class AppTests(unittest.TestCase):
     def setUp(self):
-        app_module.app.config.update(TESTING=True)
+        app_module.app.config.update(
+            TESTING=True,
+            SESSION_COOKIE_SECURE=False,
+        )
         app_module.cost_cache.clear()
         app_module.cost_rate_limit_cooldowns.clear()
         app_module.cost_query_locks.clear()
         app_module.vm_cache.clear()
         app_module.vm_query_locks.clear()
+        app_module.login_ip_attempts.clear()
+        app_module.login_account_attempts.clear()
         self.context = app_module.app.app_context()
         self.context.push()
         app_module.db.drop_all()
@@ -50,11 +56,14 @@ class AppTests(unittest.TestCase):
 
     def login(self):
         self.client.get("/login")
-        return self.client.post("/login", data={
+        response = self.client.post("/login", data={
             "csrf_token": self.csrf_token(),
             "username": "admin",
             "password": "password",
         })
+        if response.status_code == 302:
+            self.client.get(response.headers["Location"])
+        return response
 
     def add_credential(self):
         credential = app_module.Credential(
@@ -76,6 +85,198 @@ class AppTests(unittest.TestCase):
         settings_response = self.client.get("/settings")
         self.assertEqual(settings_response.status_code, 302)
         self.assertIn("/login", settings_response.headers["Location"])
+
+    def test_session_cookie_security_and_lifetime(self):
+        app_module.app.config["SESSION_COOKIE_SECURE"] = True
+        client = app_module.app.test_client()
+
+        response = client.get("/login")
+        cookie = response.headers["Set-Cookie"]
+
+        self.assertIn("Secure", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Lax", cookie)
+        self.assertEqual(
+            app_module.app.config["PERMANENT_SESSION_LIFETIME"].total_seconds(),
+            8 * 60 * 60,
+        )
+        self.assertEqual(
+            app_module.app.config["MAX_CONTENT_LENGTH"],
+            256 * 1024,
+        )
+        app_module.app.config["SESSION_COOKIE_SECURE"] = False
+
+    def test_successful_login_is_audited_and_uses_forwarded_ip(self):
+        self.client.get("/login")
+        response = self.client.post(
+            "/login",
+            data={
+                "csrf_token": self.csrf_token(),
+                "username": "admin",
+                "password": "password",
+            },
+            headers={
+                "X-Forwarded-For": "203.0.113.7",
+                "User-Agent": "Security Test Browser",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        audit = app_module.LoginAudit.query.one()
+        self.assertEqual(audit.username, "admin")
+        self.assertEqual(audit.ip_address, "203.0.113.7")
+        self.assertEqual(audit.status, "成功")
+        self.assertEqual(audit.user_agent, "Security Test Browser")
+        with self.client.session_transaction() as client_session:
+            self.assertTrue(client_session.permanent)
+
+    def test_ip_is_locked_after_five_failed_logins(self):
+        self.client.get("/login")
+        token = self.csrf_token()
+
+        for attempt in range(app_module.LOGIN_IP_FAILURE_LIMIT):
+            response = self.client.post("/login", data={
+                "csrf_token": token,
+                "username": "wrong-account",
+                "password": "wrong-password",
+            })
+
+        self.assertEqual(response.status_code, 429)
+        self.assertGreaterEqual(int(response.headers["Retry-After"]), 899)
+
+        blocked = self.client.post("/login", data={
+            "csrf_token": token,
+            "username": "admin",
+            "password": "password",
+        })
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(
+            app_module.LoginAudit.query.filter_by(status="已拦截").count(),
+            1,
+        )
+
+    def test_account_is_locked_after_ten_failed_logins_across_ips(self):
+        self.client.get("/login")
+        token = self.csrf_token()
+
+        for attempt in range(app_module.LOGIN_ACCOUNT_FAILURE_LIMIT):
+            response = self.client.post(
+                "/login",
+                data={
+                    "csrf_token": token,
+                    "username": "admin",
+                    "password": "wrong-password",
+                },
+                headers={"X-Forwarded-For": "203.0.113.{}".format(attempt + 1)},
+            )
+
+        self.assertEqual(response.status_code, 429)
+        blocked = self.client.post(
+            "/login",
+            data={
+                "csrf_token": token,
+                "username": "admin",
+                "password": "password",
+            },
+            headers={"X-Forwarded-For": "203.0.113.250"},
+        )
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_successful_login_clears_previous_failure_state(self):
+        self.client.get("/login")
+        token = self.csrf_token()
+        headers = {"X-Forwarded-For": "203.0.113.21"}
+
+        self.client.post(
+            "/login",
+            data={
+                "csrf_token": token,
+                "username": "admin",
+                "password": "wrong-password",
+            },
+            headers=headers,
+        )
+        response = self.client.post(
+            "/login",
+            data={
+                "csrf_token": token,
+                "username": "admin",
+                "password": "password",
+            },
+            headers=headers,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("203.0.113.21", app_module.login_ip_attempts)
+        self.assertNotIn("admin", app_module.login_account_attempts)
+
+    def test_login_lock_expires_without_blocked_attempts_extending_it(self):
+        start_time = 1000
+        for attempt in range(app_module.LOGIN_IP_FAILURE_LIMIT):
+            retry_after = app_module.register_login_failure(
+                "203.0.113.22",
+                None,
+                now=start_time + attempt,
+            )
+
+        self.assertEqual(retry_after, app_module.LOGIN_LOCK_SECONDS)
+        self.assertEqual(
+            app_module.login_retry_after(
+                "203.0.113.22",
+                None,
+                now=start_time + app_module.LOGIN_IP_FAILURE_LIMIT + 60,
+            ),
+            app_module.LOGIN_LOCK_SECONDS - 61,
+        )
+        self.assertEqual(
+            app_module.login_retry_after(
+                "203.0.113.22",
+                None,
+                now=start_time + app_module.LOGIN_IP_FAILURE_LIMIT + app_module.LOGIN_LOCK_SECONDS,
+            ),
+            0,
+        )
+
+    def test_login_audit_retention_is_bounded(self):
+        self.client.get("/login")
+        token = self.csrf_token()
+
+        with patch.object(app_module, "LOGIN_AUDIT_MAX_RECORDS", 2):
+            for attempt in range(3):
+                self.client.post("/login", data={
+                    "csrf_token": token,
+                    "username": "wrong-{}".format(attempt),
+                    "password": "wrong-password",
+                })
+
+        self.assertEqual(app_module.LoginAudit.query.count(), 2)
+
+    def test_request_body_larger_than_limit_returns_413(self):
+        self.client.get("/login")
+
+        response = self.client.post(
+            "/login",
+            data={"padding": "x" * (app_module.MAX_REQUEST_BYTES + 1)},
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("请求内容过大".encode("utf-8"), response.data)
+
+    def test_logout_requires_post_and_csrf(self):
+        self.login()
+        self.client.get("/")
+        token = self.csrf_token()
+
+        self.assertEqual(self.client.get("/logout").status_code, 405)
+
+        rejected = self.client.post("/logout")
+        self.assertEqual(rejected.status_code, 302)
+        self.assertNotIn("/login", rejected.headers["Location"])
+
+        response = self.client.post("/logout", data={"csrf_token": token})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+        self.assertIn("/login", self.client.get("/").headers["Location"])
 
     def test_account_list_is_paginated(self):
         self.login()
@@ -228,7 +429,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(invalid_response.data.count(b"page-size-target-"), 10)
         self.assertIn(b'<option value="10" selected>10', invalid_response.data)
 
-    def test_operation_logs_show_failure_details_only_for_failed_tasks(self):
+    def test_operation_logs_show_details_for_successful_and_failed_tasks(self):
         self.login()
         app_module.db.session.add_all([
             app_module.OperationLog(
@@ -254,12 +455,87 @@ class AppTests(unittest.TestCase):
         html = response.data.decode("utf-8")
         self.assertEqual(
             re.findall(r"<th>(.*?)</th>", html),
-            ["账号", "操作", "VM名称", "耗时/秒", "时间", "状态", "失败原因"],
+            ["账号", "操作", "VM名称", "耗时/秒", "时间", "状态", "任务详情"],
         )
-        self.assertEqual(html.count('data-bs-target="#failure-detail-modal"'), 1)
-        self.assertIn('data-failure-detail="Azure 权限不足"', html)
-        self.assertIn('disabled aria-disabled="true"', html)
-        self.assertIn('id="failure-detail-content"', html)
+        self.assertEqual(html.count('data-bs-target="#task-detail-modal"'), 2)
+        self.assertIn('data-task-detail="Azure 权限不足"', html)
+        self.assertIn(
+            'data-task-detail="VM 登录凭据：用户名 user，密码 password"',
+            html,
+        )
+        self.assertNotIn('disabled aria-disabled="true"', html)
+        self.assertIn('id="task-detail-content"', html)
+
+    def test_unknown_error_returns_reference_without_exposing_details(self):
+        internal_detail = "database failed at /srv/private/database.db"
+
+        with patch.object(app_module.app.logger, "error") as log_error:
+            message = app_module.friendly_error_message(
+                RuntimeError(internal_detail),
+                context="测试未知异常",
+            )
+
+        self.assertNotIn(internal_detail, message)
+        self.assertRegex(
+            message,
+            r"^操作失败，请联系管理员并提供错误编号：[A-F0-9]{10}$",
+        )
+        error_reference = message.rsplit("：", 1)[1]
+        self.assertIn(error_reference, str(log_error.call_args))
+        self.assertIn("exc_info", log_error.call_args.kwargs)
+
+    def test_500_page_returns_reference_without_exposing_details(self):
+        internal_detail = "unexpected failure at /srv/private/app.py"
+        error = SimpleNamespace(original_exception=RuntimeError(internal_detail))
+
+        with app_module.app.test_request_context("/"), \
+                patch.object(app_module.app.logger, "error") as log_error:
+            response, status_code = app_module.internal_server_error(error)
+
+        self.assertEqual(status_code, 500)
+        self.assertNotIn(internal_detail, response)
+        self.assertRegex(
+            response,
+            r"操作失败，请联系管理员并提供错误编号：[A-F0-9]{10}",
+        )
+        error_reference = re.search(r"错误编号：([A-F0-9]{10})", response).group(1)
+        self.assertIn(error_reference, str(log_error.call_args))
+
+    def test_queue_failure_saves_reference_instead_of_raw_exception(self):
+        credential = self.add_credential()
+        internal_detail = "executor failed at /srv/private/worker.py"
+
+        with patch.object(
+            app_module.task_executor,
+            "submit",
+            side_effect=RuntimeError(internal_detail),
+        ), patch.object(app_module.app.logger, "error"):
+            with self.assertRaises(app_module.ErrorReferenceException) as raised:
+                app_module.queue_operation(
+                    credential,
+                    "创建 VM",
+                    "demo-vm",
+                    lambda *args: None,
+                    (),
+                )
+
+        operation_log = app_module.OperationLog.query.one()
+        self.assertEqual(operation_log.status, "失败")
+        self.assertNotIn(internal_detail, operation_log.detail)
+        self.assertRegex(
+            operation_log.detail,
+            r"^操作失败，请联系管理员并提供错误编号：[A-F0-9]{10}$",
+        )
+        self.assertEqual(str(raised.exception), operation_log.detail)
+
+        with app_module.app.test_request_context("/"), \
+                patch.object(app_module.app.logger, "error") as duplicate_log:
+            response, status_code = app_module.internal_server_error(
+                SimpleNamespace(original_exception=raised.exception)
+            )
+        self.assertEqual(status_code, 500)
+        self.assertIn(operation_log.detail, response)
+        duplicate_log.assert_not_called()
 
     def test_legacy_credential_table_gets_updated_at_column(self):
         app_module.db.drop_all()
@@ -393,14 +669,15 @@ class AppTests(unittest.TestCase):
         self.assertIn("vm_cache_days", column_names)
         self.assertEqual(cache_days, 1)
 
-    def test_system_settings_uses_two_tabs_and_combines_vm_settings(self):
+    def test_system_settings_uses_three_tabs_and_combines_vm_settings(self):
         self.login()
 
         response = self.client.get("/settings")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data.count(b'data-settings-tab='), 2)
+        self.assertEqual(response.data.count(b'data-settings-tab='), 3)
         self.assertIn("常规设置".encode("utf-8"), response.data)
+        self.assertIn("登录记录".encode("utf-8"), response.data)
         self.assertNotIn("脚本设置".encode("utf-8"), response.data)
         self.assertNotIn("VM 默认设置".encode("utf-8"), response.data)
         self.assertNotIn("显示名称".encode("utf-8"), response.data)
@@ -419,6 +696,26 @@ class AppTests(unittest.TestCase):
 
         legacy_response = self.client.get("/settings?tab=vm_defaults")
         self.assertIn(b'class="nav-link active" id="settings-general-tab"', legacy_response.data)
+
+    def test_login_audit_tab_is_paginated(self):
+        self.login()
+        for index in range(11):
+            app_module.db.session.add(app_module.LoginAudit(
+                username="audit-user-{}".format(index),
+                ip_address="203.0.113.{}".format(index),
+                status="失败",
+                detail="用户名或密码错误",
+                user_agent="Test Browser {}".format(index),
+            ))
+        app_module.db.session.commit()
+
+        first_page = self.client.get("/settings?tab=audit")
+        second_page = self.client.get("/settings?tab=audit&audit_page=2")
+
+        self.assertIn(b'id="settings-audit-tab"', first_page.data)
+        self.assertIn(b'id="settings-audit-pane"', first_page.data)
+        self.assertNotIn(b"audit-user-0", first_page.data)
+        self.assertIn(b"audit-user-0", second_page.data)
 
     def test_general_settings_updates_timezone_and_vm_cache(self):
         self.login()

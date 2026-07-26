@@ -10,12 +10,52 @@
 
 账号新增和编辑使用共享弹窗，删除及高风险 VM 操作使用确认弹窗，Flask Flash 消息使用紧凑 Toast 展示。
 
+### 登录
+
+![登录](docs/images/login.jpg)
+
+### 账号管理
+
+![账号管理](docs/images/account-management.jpg)
+
+### 添加 Azure 账号
+
+![添加 Azure 账号](docs/images/account-form.jpg)
+
+### VM 管理
+
+![VM 管理](docs/images/vm-management.jpg)
+
+### 创建 VM
+
+![创建 VM](docs/images/create-vm.jpg)
+
+### 费用概览
+
+![费用概览](docs/images/cost-overview.jpg)
+
+### 任务日志
+
+![任务日志](docs/images/task-logs.jpg)
+
+### 系统设置：常规设置
+
+![系统设置：常规设置](docs/images/settings-general.jpg)
+
+### 系统设置：账号安全
+
+![系统设置：账号安全](docs/images/settings-account.jpg)
+
+### 登录记录
+
+![登录记录](docs/images/login-audit.jpg)
+
 ## 使用方法
 
 ```bash
 docker run -itd --name az \
 --restart always \
--p 8888:8888 \
+-p 127.0.0.1:18888:18888 \
 -v /path/to/azure-data:/root/azure \
 dqjdda/azure-manager:latest
 ```
@@ -25,7 +65,7 @@ dqjdda/azure-manager:latest
 ```bash
 docker run -itd --name az \
 --restart always \
--p 8888:8888 \
+-p 127.0.0.1:18888:18888 \
 -v /path/to/azure-data:/root/azure \
 dqjdda/azure-manager:arm
 ```
@@ -44,13 +84,46 @@ dqjdda/azure-manager:arm
 ```bash
 docker run -itd --name az \
 --restart always \
--p 8888:8888 \
+-p 127.0.0.1:18888:18888 \
 -v /path/to/azure-data:/root/azure \
 -e AZURE_MANAGER_MASTER_KEY='请替换为随机强密钥' \
 dqjdda/azure-manager:latest
 ```
 
 本地使用 `python azure/app.py` 启动时，`.master-key` 保存在命令执行时的当前目录。不要提交或公开该文件。
+
+生产容器使用 Gunicorn 单 Worker、`gthread` 和 4 个线程运行。单 Worker 用于保持任务队列、费用缓存、VM 缓存及登录限速状态的一致性。
+
+### 错误排查
+
+页面遇到未预期异常时，只会显示通用提示和错误编号，不会返回服务器路径、SDK 响应或异常堆栈。请根据页面显示的错误编号查看容器日志：
+
+```bash
+docker logs az
+```
+
+日志会记录相同的错误编号、完整异常和堆栈，便于定位对应请求。任务日志同样只保存通用提示和错误编号，不会保存未知异常的原始内容。
+
+应用默认启用安全 Session Cookie，须通过 HTTPS 访问。仅在本地 HTTP 调试时可以临时关闭：
+
+```bash
+AZURE_MANAGER_SECURE_COOKIE=false python azure/app.py
+```
+
+Nginx 反向代理示例：
+
+```nginx
+location / {
+    client_max_body_size 256k;
+    proxy_pass http://127.0.0.1:18888;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+宿主机只将 `18888` 发布到 `127.0.0.1`，不要通过防火墙向公网开放该端口。
 
 ## 重置管理密码
 
@@ -98,8 +171,16 @@ Azure for Students 的 Credit 余额不属于 Cost Management 返回范围：
 
 ### 系统设置
 
-登录后可通过“系统设置”的 TAB 分别管理常规设置和账号安全。默认时区为 `Asia/Shanghai`；数据库时间仍以 UTC 保存，账号更新时间、任务日志和费用查询时间会在页面按当前用户选择的时区转换显示。账号管理和任务日志默认每页显示 `10` 条，桌面端可在对应页面临时切换为 `20` 或 `50` 条。
+登录后可通过“系统设置”的 TAB 分别管理常规设置、账号安全和登录记录。默认时区为 `Asia/Shanghai`；数据库时间仍以 UTC 保存，账号更新时间、任务日志和费用查询时间会在页面按当前用户选择的时区转换显示。账号管理和任务日志默认每页显示 `10` 条，桌面端可在对应页面临时切换为 `20` 或 `50` 条。
 
 常规设置可以保存创建 VM 时自动填入的 Base64 脚本。脚本使用主密钥加密存储，解码后不能超过 64 KB；创建时临时修改或清空只影响当前任务，不会覆盖默认设置。
 
 VM 列表按设置的 `1` 至 `30` 天有效期缓存在应用进程内，重启后自动清空。点击 VM 管理页的“刷新”会立即重新查询 Azure；账号凭据更新、账号删除或 VM 创建、启动、停止、更换 IP、删除成功后，也会自动清除对应账号的缓存。
+
+### 登录安全
+
+同一来源 IP 在 5 分钟内登录失败 5 次，或同一账号在 15 分钟内失败 10 次后，将临时锁定 15 分钟。锁定状态保存在当前进程内，应用重启后清空。
+
+登录成功、失败及被限速拦截的事件会写入登录审计，最多保留最近 2000 条，可在“系统设置 → 登录记录”中分页查看。Session Cookie 默认启用 `Secure`、`HttpOnly` 和 `SameSite=Lax`，登录 Session 有效期为 8 小时。
+
+应用请求体最大为 `256 KB`。Nginx 应配置相同的 `client_max_body_size`，在请求进入应用前拒绝超大表单。
