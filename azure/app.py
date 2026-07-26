@@ -123,6 +123,8 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
+login_manager.login_message = "请先登录后再访问此页面"
+login_manager.needs_refresh_message = "请重新登录后再访问此页面"
 task_executor = ThreadPoolExecutor(max_workers=max(1, int(os.environ.get("AZURE_MANAGER_WORKERS", "4"))))
 cost_cache = {}
 cost_rate_limit_cooldowns = {}

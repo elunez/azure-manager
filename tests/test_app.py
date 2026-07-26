@@ -86,6 +86,13 @@ class AppTests(unittest.TestCase):
         self.assertEqual(settings_response.status_code, 302)
         self.assertIn("/login", settings_response.headers["Location"])
 
+    def test_login_required_message_is_chinese(self):
+        response = self.client.get("/settings", follow_redirects=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("请先登录后再访问此页面".encode("utf-8"), response.data)
+        self.assertNotIn(b"Please log in to access this page.", response.data)
+
     def test_session_cookie_security_and_lifetime(self):
         app_module.app.config["SESSION_COOKIE_SECURE"] = True
         client = app_module.app.test_client()
