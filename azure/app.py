@@ -730,6 +730,11 @@ def update_operation_log(log_id, status, detail, finished=False):
     db.session.commit()
 
 
+def task_error_detail(error):
+    """返回仅供登录管理员查看的任务原始错误内容。"""
+    return str(error) or error.__class__.__name__
+
+
 def run_operation(log_id, credential_id, operation, args):
     with app.app_context():
         try:
@@ -740,10 +745,11 @@ def run_operation(log_id, credential_id, operation, args):
             credential = azure_credential(credential_record)
             success_detail = operation(credential_record.subscription_id, credential, *args)
         except Exception as error:
+            app.logger.exception("任务日志 %s 执行失败", log_id)
             update_operation_log(
                 log_id,
                 "失败",
-                friendly_error_message(error, context="任务日志 {} 执行失败".format(log_id)),
+                task_error_detail(error),
                 finished=True,
             )
         else:
@@ -765,7 +771,7 @@ def queue_operation(credential_record, action, target, operation, args):
         update_operation_log(
             log_id,
             "失败",
-            public_message,
+            task_error_detail(error),
             finished=True,
         )
         raise ErrorReferenceException(public_message) from error

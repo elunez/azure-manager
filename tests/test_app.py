@@ -508,7 +508,7 @@ class AppTests(unittest.TestCase):
         error_reference = re.search(r"错误编号：([A-F0-9]{10})", response).group(1)
         self.assertIn(error_reference, str(log_error.call_args))
 
-    def test_queue_failure_saves_reference_instead_of_raw_exception(self):
+    def test_queue_failure_saves_raw_exception_but_page_uses_reference(self):
         credential = self.add_credential()
         internal_detail = "executor failed at /srv/private/worker.py"
 
@@ -528,12 +528,11 @@ class AppTests(unittest.TestCase):
 
         operation_log = app_module.OperationLog.query.one()
         self.assertEqual(operation_log.status, "失败")
-        self.assertNotIn(internal_detail, operation_log.detail)
+        self.assertEqual(operation_log.detail, internal_detail)
         self.assertRegex(
-            operation_log.detail,
+            str(raised.exception),
             r"^操作失败，请联系管理员并提供错误编号：[A-F0-9]{10}$",
         )
-        self.assertEqual(str(raised.exception), operation_log.detail)
 
         with app_module.app.test_request_context("/"), \
                 patch.object(app_module.app.logger, "error") as duplicate_log:
@@ -541,7 +540,8 @@ class AppTests(unittest.TestCase):
                 SimpleNamespace(original_exception=raised.exception)
             )
         self.assertEqual(status_code, 500)
-        self.assertIn(operation_log.detail, response)
+        self.assertNotIn(operation_log.detail, response)
+        self.assertIn(str(raised.exception), response)
         duplicate_log.assert_not_called()
 
     def test_legacy_credential_table_gets_updated_at_column(self):
@@ -1136,6 +1136,42 @@ class AppTests(unittest.TestCase):
         self.assertEqual(operation_log.detail, "VM 登录凭据：用户名 user，密码 password")
         self.assertIsNotNone(operation_log.finished_at)
         self.assertNotIn(credential_id, app_module.vm_cache)
+
+    def test_operation_failure_saves_raw_exception_in_log(self):
+        credential = self.add_credential()
+        operation_log = app_module.OperationLog(
+            credential_id=credential.id,
+            account=credential.account,
+            action="创建 VM",
+            target="vm-name",
+            status="排队中",
+            detail="任务等待执行",
+        )
+        app_module.db.session.add(operation_log)
+        app_module.db.session.commit()
+        operation_log_id = operation_log.id
+        internal_detail = "Azure request failed\nresource: /subscriptions/private-id"
+
+        def failing_operation(*args):
+            raise RuntimeError(internal_detail)
+
+        with patch.object(app_module, "azure_credential", return_value=object()), \
+                patch.object(app_module.app.logger, "exception") as log_exception:
+            app_module.run_operation(
+                operation_log_id,
+                credential.id,
+                failing_operation,
+                (),
+            )
+
+        operation_log = app_module.OperationLog.query.get(operation_log_id)
+        self.assertEqual(operation_log.status, "失败")
+        self.assertEqual(operation_log.detail, internal_detail)
+        self.assertIsNotNone(operation_log.finished_at)
+        log_exception.assert_called_once_with(
+            "任务日志 %s 执行失败",
+            operation_log_id,
+        )
 
     def test_invalid_vm_form_returns_specific_error(self):
         self.login()
