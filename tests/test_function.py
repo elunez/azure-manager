@@ -2,7 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +98,130 @@ class CredentialValidationTests(unittest.TestCase):
 
         resource_client_class.assert_called_once_with(ANY, "subscription-id")
         resource_client_class.return_value.resource_groups.list.assert_called_once_with()
+
+
+class LongRunningOperationTests(unittest.TestCase):
+    @patch.object(function, "NetworkManagementClient")
+    @patch.object(function, "ComputeManagementClient")
+    def test_create_vm_uses_begin_create_or_update(self, compute_client_class,
+                                                   network_client_class):
+        network_client = network_client_class.return_value
+        compute_client = compute_client_class.return_value
+        resources = (
+            (network_client.virtual_networks, "vnet-id"),
+            (network_client.subnets, "subnet-id"),
+            (network_client.public_ip_addresses, "public-ip-id"),
+            (network_client.network_security_groups, "nsg-id"),
+            (network_client.network_interfaces, "nic-id"),
+        )
+        for operations, resource_id in resources:
+            operations.begin_create_or_update.return_value.result.return_value = resource(
+                resource_id
+            )
+        compute_client.virtual_machines.begin_create_or_update.return_value.result.return_value = resource(
+            "vm-id"
+        )
+
+        function.create_or_update_vm(
+            "subscription-id",
+            object(),
+            "vm-name",
+            "japaneast",
+            "vm-user",
+            "strong-password",
+            "Standard_B1s",
+            "Debian_12_X64",
+            "",
+            64,
+        )
+
+        for operations, _ in resources:
+            operations.begin_create_or_update.assert_called_once()
+            operations.create_or_update.assert_not_called()
+        compute_client.virtual_machines.begin_create_or_update.assert_called_once()
+        compute_client.virtual_machines.create_or_update.assert_not_called()
+
+    @patch.object(function, "ResourceManagementClient")
+    @patch.object(function, "ComputeManagementClient")
+    def test_vm_lifecycle_uses_begin_methods(self, compute_client_class,
+                                             resource_client_class):
+        compute_operations = compute_client_class.return_value.virtual_machines
+        resource_group_operations = resource_client_class.return_value.resource_groups
+
+        function.start_vm("subscription-id", object(), "resource-group", "vm-name")
+        function.stop_vm("subscription-id", object(), "resource-group", "vm-name")
+        function.delete_vm("subscription-id", object(), "resource-group")
+
+        compute_operations.begin_start.assert_called_once_with(
+            "resource-group", "vm-name"
+        )
+        compute_operations.begin_start.return_value.wait.assert_called_once_with()
+        compute_operations.begin_deallocate.assert_called_once_with(
+            "resource-group", "vm-name"
+        )
+        compute_operations.begin_deallocate.return_value.wait.assert_called_once_with()
+        resource_group_operations.begin_delete.assert_called_once_with("resource-group")
+        resource_group_operations.begin_delete.return_value.result.assert_called_once_with()
+        compute_operations.start.assert_not_called()
+        compute_operations.deallocate.assert_not_called()
+        resource_group_operations.delete.assert_not_called()
+
+    @patch.object(function.uuid, "uuid4")
+    @patch.object(function, "NetworkManagementClient")
+    @patch.object(function, "ComputeManagementClient")
+    def test_static_ip_change_uses_begin_methods(self, compute_client_class,
+                                                 network_client_class, uuid4):
+        uuid4.return_value.hex = "12345678abcdef"
+        compute_client = compute_client_class.return_value
+        network_client = network_client_class.return_value
+        nic_reference = resource(
+            "/subscriptions/sub/resourceGroups/network-rg/providers/"
+            "Microsoft.Network/networkInterfaces/nic-1"
+        )
+        public_ip_reference = resource(
+            "/subscriptions/sub/resourceGroups/network-rg/providers/"
+            "Microsoft.Network/publicIPAddresses/ip-1"
+        )
+        ip_configuration = resource(public_ip_address=public_ip_reference)
+        nic = resource(ip_configurations=[ip_configuration])
+        public_ip = resource(
+            location="japaneast",
+            public_ip_allocation_method="Static",
+            public_ip_address_version="IPV4",
+            zones=[],
+        )
+        compute_client.virtual_machines.get.return_value = resource(
+            network_profile=resource(network_interfaces=[nic_reference])
+        )
+        network_client.network_interfaces.get.return_value = nic
+        network_client.public_ip_addresses.get.return_value = public_ip
+        network_client.public_ip_addresses.begin_create_or_update.return_value.result.return_value = resource(
+            "replacement-ip-id"
+        )
+
+        function.change_ip(
+            "subscription-id", object(), "vm-resource-group", "vm-name"
+        )
+
+        network_client.public_ip_addresses.begin_create_or_update.assert_called_once_with(
+            "network-rg",
+            "ip-1-12345678",
+            {
+                "location": "japaneast",
+                "sku": {"name": "Standard"},
+                "public_ip_allocation_method": "Static",
+                "public_ip_address_version": "IPV4",
+            },
+        )
+        network_client.network_interfaces.begin_create_or_update.assert_called_once_with(
+            "network-rg", "nic-1", nic
+        )
+        network_client.public_ip_addresses.begin_delete.assert_called_once_with(
+            "network-rg", "ip-1"
+        )
+        network_client.public_ip_addresses.create_or_update.assert_not_called()
+        network_client.network_interfaces.create_or_update.assert_not_called()
+        network_client.public_ip_addresses.delete.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -118,21 +118,21 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
     network_client = NetworkManagementClient(credential, subscription_id)
     try:
         print("Create VNET")
-        poller = network_client.virtual_networks.create_or_update(RESOURCE_GROUP_NAME,
-                                                                  VNET_NAME,
-                                                                  {
-                                                                      "location": LOCATION,
-                                                                      "address_space": {
-                                                                          "address_prefixes": ["10.0.0.0/16"]
-                                                                      }
-                                                                  }
-                                                                  )
+        poller = network_client.virtual_networks.begin_create_or_update(RESOURCE_GROUP_NAME,
+                                                                        VNET_NAME,
+                                                                        {
+                                                                            "location": LOCATION,
+                                                                            "address_space": {
+                                                                                "address_prefixes": ["10.0.0.0/16"]
+                                                                            }
+                                                                        }
+                                                                        )
         vnet_result = poller.result()
         print("Create Subnets")
-        poller = network_client.subnets.create_or_update(RESOURCE_GROUP_NAME,
-                                                         VNET_NAME, SUBNET_NAME,
-                                                         {"address_prefix": "10.0.0.0/24"}
-                                                         )
+        poller = network_client.subnets.begin_create_or_update(RESOURCE_GROUP_NAME,
+                                                               VNET_NAME, SUBNET_NAME,
+                                                               {"address_prefix": "10.0.0.0/24"}
+                                                               )
         subnet_result = poller.result()
         print("Create Public IP")
         public_ip_parameters = {
@@ -141,10 +141,11 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
             "public_ip_allocation_method": "Static",
             "public_ip_address_version": "IPV4"
         }
-        poller = network_client.public_ip_addresses.create_or_update(RESOURCE_GROUP_NAME, IP_NAME, public_ip_parameters)
+        poller = network_client.public_ip_addresses.begin_create_or_update(
+            RESOURCE_GROUP_NAME, IP_NAME, public_ip_parameters)
         ip_address_result = poller.result()
         print("Create Network Security Group")
-        poller = network_client.network_security_groups.create_or_update(
+        poller = network_client.network_security_groups.begin_create_or_update(
             RESOURCE_GROUP_NAME,
             NSG_NAME,
             {
@@ -177,21 +178,21 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
         )
         security_group_result = poller.result()
         print("Create Interface")
-        poller = network_client.network_interfaces.create_or_update(RESOURCE_GROUP_NAME,
-                                                                    NIC_NAME,
-                                                                    {
-                                                                        "location": LOCATION,
-                                                                        "ip_configurations": [{
-                                                                            "name": IP_CONFIG_NAME,
-                                                                            "subnet": {"id": subnet_result.id},
-                                                                            "public_ip_address": {
-                                                                                "id": ip_address_result.id}
-                                                                        }],
-                                                                        "network_security_group": {
-                                                                            "id": security_group_result.id
-                                                                        }
-                                                                    }
-                                                                    )
+        poller = network_client.network_interfaces.begin_create_or_update(RESOURCE_GROUP_NAME,
+                                                                          NIC_NAME,
+                                                                          {
+                                                                              "location": LOCATION,
+                                                                              "ip_configurations": [{
+                                                                                  "name": IP_CONFIG_NAME,
+                                                                                  "subnet": {"id": subnet_result.id},
+                                                                                  "public_ip_address": {
+                                                                                      "id": ip_address_result.id}
+                                                                              }],
+                                                                              "network_security_group": {
+                                                                                  "id": security_group_result.id
+                                                                              }
+                                                                          }
+                                                                          )
         nic_result = poller.result()
         print("Create VM")
         vm_parameters = {
@@ -212,7 +213,8 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
             },
             "network_profile": {"network_interfaces": [{"id": nic_result.id}]}
         }
-        poller = compute_client.virtual_machines.create_or_update(RESOURCE_GROUP_NAME, VM_NAME, vm_parameters)
+        poller = compute_client.virtual_machines.begin_create_or_update(
+            RESOURCE_GROUP_NAME, VM_NAME, vm_parameters)
         vm_result = poller.result()
         print("Create VM {} successful".format(tag))
     except Exception:
@@ -226,19 +228,19 @@ def create_or_update_vm(subscription_id, credential, tag, location, username, pa
 
 def start_vm(subscription_id, credential, resource_group, vm_name):
     compute_client = ComputeManagementClient(credential, subscription_id)
-    async_vm_start = compute_client.virtual_machines.start(resource_group, vm_name)
+    async_vm_start = compute_client.virtual_machines.begin_start(resource_group, vm_name)
     async_vm_start.wait()
 
 
 def stop_vm(subscription_id, credential, resource_group, vm_name):
     compute_client = ComputeManagementClient(credential, subscription_id)
-    async_vm_deallocate = compute_client.virtual_machines.deallocate(resource_group, vm_name)
+    async_vm_deallocate = compute_client.virtual_machines.begin_deallocate(resource_group, vm_name)
     async_vm_deallocate.wait()
 
 
 def delete_vm(subscription_id, credential, resource_group):
     resource_client = ResourceManagementClient(credential, subscription_id)
-    resource_client.resource_groups.delete(resource_group).result()
+    resource_client.resource_groups.begin_delete(resource_group).result()
 
 
 def change_ip(subscription_id, credential, resource_group_name, vm_name):
@@ -263,9 +265,9 @@ def change_ip(subscription_id, credential, resource_group_name, vm_name):
     if allocation_method == "dynamic":
         logger.info("Changing dynamic public IP for VM %s/%s by deallocating and starting it",
                     resource_group_name, vm_name)
-        compute_client.virtual_machines.deallocate(resource_group_name, vm_name).wait()
+        compute_client.virtual_machines.begin_deallocate(resource_group_name, vm_name).wait()
         time.sleep(10)
-        compute_client.virtual_machines.start(resource_group_name, vm_name).wait()
+        compute_client.virtual_machines.begin_start(resource_group_name, vm_name).wait()
         return
 
     if allocation_method != "static":
@@ -287,11 +289,13 @@ def change_ip(subscription_id, credential, resource_group_name, vm_name):
     try:
         logger.info("Creating replacement static public IP %s for VM %s/%s",
                     replacement_ip_name, resource_group_name, vm_name)
-        replacement_ip = network_client.public_ip_addresses.create_or_update(
+        replacement_ip = network_client.public_ip_addresses.begin_create_or_update(
             public_ip_resource_group, replacement_ip_name, replacement_parameters).result()
         ip_configuration.public_ip_address = {"id": replacement_ip.id}
-        network_client.network_interfaces.create_or_update(nic_resource_group, nic_name, nic).result()
-        network_client.public_ip_addresses.delete(public_ip_resource_group, public_ip_name).result()
+        network_client.network_interfaces.begin_create_or_update(
+            nic_resource_group, nic_name, nic).result()
+        network_client.public_ip_addresses.begin_delete(
+            public_ip_resource_group, public_ip_name).result()
         logger.info("Changed static public IP for VM %s/%s", resource_group_name, vm_name)
     except Exception:
         logger.exception("Failed to replace static public IP for VM %s/%s", resource_group_name, vm_name)
