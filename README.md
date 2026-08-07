@@ -57,17 +57,24 @@ docker run -itd --name az \
 --restart always \
 -p 127.0.0.1:18888:18888 \
 -v /path/to/azure-data:/root/azure \
-dqjdda/azure-manager:latest
+ghcr.io/elunez/azure-manager:latest
 ```
 
-**ARM机器用户请使用** 
+镜像同时支持 `linux/amd64` 和 `linux/arm64`，两种架构使用相同标签，Docker 会根据宿主机架构自动选择对应镜像。
+
+## 自动构建镜像
+
+GitHub Actions 会使用仓库中的 `Dockerfile` 自动构建多架构镜像，并发布到 GitHub Container Registry：
+
+- 推送到 `master` 分支时，发布 `latest`、`master` 和提交哈希标签。
+- 推送以 `v` 开头的 Git 标签时，发布对应版本标签，例如 `v1.0.0`。
+- Pull Request 只验证镜像能否成功构建，不会推送镜像。
+- 也可以在 GitHub Actions 页面手动触发构建。
+
+首次发布后，需要在 GitHub Packages 设置中确认 `azure-manager` 容器镜像为公开状态，否则拉取前需要先登录 GHCR：
 
 ```bash
-docker run -itd --name az \
---restart always \
--p 127.0.0.1:18888:18888 \
--v /path/to/azure-data:/root/azure \
-dqjdda/azure-manager:arm
+docker login ghcr.io
 ```
 
 ## 数据与主密钥
@@ -87,7 +94,7 @@ docker run -itd --name az \
 -p 127.0.0.1:18888:18888 \
 -v /path/to/azure-data:/root/azure \
 -e AZURE_MANAGER_MASTER_KEY='请替换为随机强密钥' \
-dqjdda/azure-manager:latest
+ghcr.io/elunez/azure-manager:latest
 ```
 
 本地使用 `python azure/app.py` 启动时，`.master-key` 保存在命令执行时的当前目录。不要提交或公开该文件。
