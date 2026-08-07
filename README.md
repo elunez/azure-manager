@@ -1,55 +1,5 @@
 ## Azure 管理
 
-在原版的基础上 去广告、汉化等。
-
-原版：https://github.com/1injex/azure-manager
-
-## 界面
-
-管理界面基于 Bootstrap `5.3.7` 和 Bootstrap Icons `1.13.1`，使用 Flask/Jinja2 服务端渲染，不依赖 Node.js 或前端构建流程。静态资源固定在 `azure/static/vendor`，运行时不访问 CDN。
-
-账号新增和编辑使用共享弹窗，删除及高风险 VM 操作使用确认弹窗，Flask Flash 消息使用紧凑 Toast 展示。
-
-### 登录
-
-![登录](docs/images/login.jpg)
-
-### 账号管理
-
-![账号管理](docs/images/account-management.jpg)
-
-### 添加 Azure 账号
-
-![添加 Azure 账号](docs/images/account-form.jpg)
-
-### VM 管理
-
-![VM 管理](docs/images/vm-management.jpg)
-
-### 创建 VM
-
-![创建 VM](docs/images/create-vm.jpg)
-
-### 费用概览
-
-![费用概览](docs/images/cost-overview.jpg)
-
-### 任务日志
-
-![任务日志](docs/images/task-logs.jpg)
-
-### 系统设置：常规设置
-
-![系统设置：常规设置](docs/images/settings-general.jpg)
-
-### 系统设置：账号安全
-
-![系统设置：账号安全](docs/images/settings-account.jpg)
-
-### 登录记录
-
-![登录记录](docs/images/login-audit.jpg)
-
 ## 使用方法
 
 ```bash
@@ -61,21 +11,6 @@ ghcr.io/elunez/azure-manager:latest
 ```
 
 镜像同时支持 `linux/amd64` 和 `linux/arm64`，两种架构使用相同标签，Docker 会根据宿主机架构自动选择对应镜像。
-
-## 自动构建镜像
-
-GitHub Actions 会使用仓库中的 `Dockerfile` 自动构建多架构镜像，并发布到 GitHub Container Registry：
-
-- 推送到 `master` 分支时，发布 `latest`、`master` 和提交哈希标签。
-- 推送以 `v` 开头的 Git 标签时，发布对应版本标签，例如 `v1.0.0`。
-- Pull Request 只验证镜像能否成功构建，不会推送镜像。
-- 也可以在 GitHub Actions 页面手动触发构建。
-
-首次发布后，需要在 GitHub Packages 设置中确认 `azure-manager` 容器镜像为公开状态，否则拉取前需要先登录 GHCR：
-
-```bash
-docker login ghcr.io
-```
 
 ## 数据与主密钥
 
@@ -100,6 +35,35 @@ ghcr.io/elunez/azure-manager:latest
 本地使用 `python azure/app.py` 启动时，`.master-key` 保存在命令执行时的当前目录。不要提交或公开该文件。
 
 生产容器使用 Gunicorn 单 Worker、`gthread` 和 4 个线程运行。单 Worker 用于保持任务队列、费用缓存、VM 缓存及登录限速状态的一致性。
+
+## 界面截图
+
+管理界面基于 Bootstrap `5.3.7` 和 Bootstrap Icons `1.13.1`，使用 Flask/Jinja2 服务端渲染，不依赖 Node.js 或前端构建流程。静态资源固定在 `azure/static/vendor`，运行时不访问 CDN。
+
+账号新增和编辑使用共享弹窗，删除及高风险 VM 操作使用确认弹窗，Flask Flash 消息使用紧凑 Toast 展示。
+
+<table>
+  <tr>
+    <td align="center"><strong>登录</strong><br><img src="docs/images/login.jpg" alt="登录" width="480"></td>
+    <td align="center"><strong>账号管理</strong><br><img src="docs/images/account-management.jpg" alt="账号管理" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>添加 Azure 账号</strong><br><img src="docs/images/account-form.jpg" alt="添加 Azure 账号" width="480"></td>
+    <td align="center"><strong>VM 管理</strong><br><img src="docs/images/vm-management.jpg" alt="VM 管理" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>创建 VM</strong><br><img src="docs/images/create-vm.jpg" alt="创建 VM" width="480"></td>
+    <td align="center"><strong>费用概览</strong><br><img src="docs/images/cost-overview.jpg" alt="费用概览" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>任务日志</strong><br><img src="docs/images/task-logs.jpg" alt="任务日志" width="480"></td>
+    <td align="center"><strong>系统设置：常规设置</strong><br><img src="docs/images/settings-general.jpg" alt="系统设置：常规设置" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>系统设置：账号安全</strong><br><img src="docs/images/settings-account.jpg" alt="系统设置：账号安全" width="480"></td>
+    <td align="center"><strong>登录记录</strong><br><img src="docs/images/login-audit.jpg" alt="登录记录" width="480"></td>
+  </tr>
+</table>
 
 ### 错误排查
 
@@ -191,3 +155,5 @@ VM 列表按设置的 `1` 至 `30` 天有效期缓存在应用进程内，重启
 登录成功、失败及被限速拦截的事件会写入登录审计，最多保留最近 2000 条，可在“系统设置 → 登录记录”中分页查看。Session Cookie 默认启用 `Secure`、`HttpOnly` 和 `SameSite=Lax`，登录 Session 有效期为 8 小时。
 
 应用请求体最大为 `256 KB`。Nginx 应配置相同的 `client_max_body_size`，在请求进入应用前拒绝超大表单。
+
+在原版的基础上二次开发，原版：[https://github.com/1injex/azure-manager](https://github.com/1injex/azure-manager)
