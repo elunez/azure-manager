@@ -55,7 +55,7 @@
 ```bash
 docker run -itd --name az \
 --restart always \
--p 127.0.0.1:18888:18888 \
+-p 18888:18888 \
 -v /path/to/azure-data:/root/azure \
 ghcr.io/elunez/azure-manager:latest
 ```
@@ -91,7 +91,7 @@ docker login ghcr.io
 ```bash
 docker run -itd --name az \
 --restart always \
--p 127.0.0.1:18888:18888 \
+-p 18888:18888 \
 -v /path/to/azure-data:/root/azure \
 -e AZURE_MANAGER_MASTER_KEY='请替换为随机强密钥' \
 ghcr.io/elunez/azure-manager:latest
@@ -130,7 +130,7 @@ location / {
 }
 ```
 
-宿主机只将 `18888` 发布到 `127.0.0.1`，不要通过防火墙向公网开放该端口。
+`-p 18888:18888` 会在宿主机所有网络接口上发布端口。请通过防火墙限制访问，不要直接向公网开放 `18888`，仅允许 Nginx Proxy Manager 所在主机或可信网络访问。
 
 ## 重置管理密码
 
