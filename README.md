@@ -156,4 +156,6 @@ VM 列表按设置的 `1` 至 `30` 天有效期缓存在应用进程内，重启
 
 应用请求体最大为 `256 KB`。Nginx 应配置相同的 `client_max_body_size`，在请求进入应用前拒绝超大表单。
 
+## 项目来源
+
 在原版的基础上二次开发，原版：[https://github.com/1injex/azure-manager](https://github.com/1injex/azure-manager)
