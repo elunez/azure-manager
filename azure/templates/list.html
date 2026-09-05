@@ -44,7 +44,10 @@
                 <th class="vm-actions-column">操作</th>
             </tr>
         </thead>
-        <tbody id="vm-table-body" data-vm-list-url="{{ url_for('vm_list_data', credential_id=credential.id) }}" aria-busy="true">
+        <tbody id="vm-table-body"
+               data-vm-list-url="{{ url_for('vm_list_data', credential_id=credential.id) }}"
+               data-vm-operation-url="{{ operation_status_url or '' }}"
+               aria-busy="true">
             <tr>
                 <td colspan="6" class="empty-state">
                     <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>

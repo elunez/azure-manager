@@ -1419,7 +1419,25 @@ def create_vm(credential_id):
 @login_required
 def vm_list(credential_id):
     credential_record = Credential.query.get_or_404(credential_id)
-    return render_template("list.html", credential=credential_record)
+    operation_status_url = None
+    operation_id = request.args.get("operation_id", "").strip()
+    if operation_id.isdigit():
+        operation_log = OperationLog.query.filter_by(
+            id=int(operation_id),
+            credential_id=credential_id,
+            action="更换 IP",
+        ).first()
+        if operation_log is not None:
+            operation_status_url = url_for(
+                "vm_operation_status",
+                credential_id=credential_id,
+                operation_id=operation_log.id,
+            )
+    return render_template(
+        "list.html",
+        credential=credential_record,
+        operation_status_url=operation_status_url,
+    )
 
 
 @app.route("/account/<int:credential_id>/vms/data")
@@ -1442,6 +1460,20 @@ def vm_list_data(credential_id):
     return jsonify(
         html=render_template("_vm_rows.html", vms=vms, credential=credential_record),
         count=len(vms),
+    )
+
+
+@app.route("/account/<int:credential_id>/vm/change-ip/<int:operation_id>/status")
+@login_required
+def vm_operation_status(credential_id, operation_id):
+    operation_log = OperationLog.query.filter_by(
+        id=operation_id,
+        credential_id=credential_id,
+        action="更换 IP",
+    ).first_or_404()
+    return jsonify(
+        status=operation_log.status,
+        finished=operation_log.status not in ACTIVE_TASK_STATUSES,
     )
 
 
@@ -1544,12 +1576,16 @@ def stop_vm(credential_id):
 def changeip_vm(credential_id):
     credential_record = Credential.query.get_or_404(credential_id)
     resource_group, vm_name = validate_vm_target(request.form)
-    queue_operation(
+    operation_id = queue_operation(
         credential_record, "更换 IP", "{}/{}".format(resource_group, vm_name), function.change_ip,
         (resource_group, vm_name),
     )
     flash("更换 IP 任务已提交")
-    return redirect(url_for("vm_list", credential_id=credential_id))
+    return redirect(url_for(
+        "vm_list",
+        credential_id=credential_id,
+        operation_id=operation_id,
+    ))
 
 
 @app.route("/account/<int:credential_id>/vm/delete", methods=["POST"])

@@ -1230,6 +1230,103 @@ class AppTests(unittest.TestCase):
         )
         self.assertNotIn("删除资源组", payload["html"])
 
+    def test_change_ip_redirects_to_vm_list_with_operation_tracking(self):
+        self.login()
+        credential = self.add_credential()
+
+        with patch.object(app_module, "queue_operation", return_value=42) as queue_operation:
+            response = self.client.post(
+                "/account/{}/vm/change-ip".format(credential.id),
+                data={
+                    "csrf_token": self.csrf_token(),
+                    "resource_group": "test-rg",
+                    "vm_name": "test-vm",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith(
+            "/account/{}/vms?operation_id=42".format(credential.id)
+        ))
+        queue_operation.assert_called_once_with(
+            credential,
+            "更换 IP",
+            "test-rg/test-vm",
+            app_module.function.change_ip,
+            ("test-rg", "test-vm"),
+        )
+
+    def test_vm_list_tracks_change_ip_operation_and_reports_completion(self):
+        self.login()
+        credential = self.add_credential()
+        operation_log = app_module.OperationLog(
+            credential_id=credential.id,
+            account=credential.account,
+            action="更换 IP",
+            target="test-rg/test-vm",
+            status="执行中",
+            detail="任务正在执行",
+        )
+        app_module.db.session.add(operation_log)
+        app_module.db.session.commit()
+        status_url = "/account/{}/vm/change-ip/{}/status".format(
+            credential.id,
+            operation_log.id,
+        )
+
+        list_response = self.client.get(
+            "/account/{}/vms?operation_id={}".format(
+                credential.id,
+                operation_log.id,
+            )
+        )
+        active_response = self.client.get(status_url)
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertIn(
+            'data-vm-operation-url="{}"'.format(status_url).encode("utf-8"),
+            list_response.data,
+        )
+        self.assertEqual(active_response.status_code, 200)
+        self.assertEqual(active_response.get_json(), {
+            "status": "执行中",
+            "finished": False,
+        })
+
+        operation_log.status = "成功"
+        operation_log.finished_at = app_module.datetime.utcnow()
+        app_module.db.session.commit()
+        completed_response = self.client.get(status_url)
+
+        self.assertEqual(completed_response.status_code, 200)
+        self.assertEqual(completed_response.get_json(), {
+            "status": "成功",
+            "finished": True,
+        })
+
+    def test_vm_operation_status_rejects_unrelated_operation(self):
+        self.login()
+        credential = self.add_credential()
+        operation_log = app_module.OperationLog(
+            credential_id=credential.id,
+            account=credential.account,
+            action="启动 VM",
+            target="test-rg/test-vm",
+            status="成功",
+            detail="操作已完成",
+        )
+        app_module.db.session.add(operation_log)
+        app_module.db.session.commit()
+
+        response = self.client.get(
+            "/account/{}/vm/change-ip/{}/status".format(
+                credential.id,
+                operation_log.id,
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_delete_vm_uses_vm_name_in_user_visible_status(self):
         self.login()
         credential = self.add_credential()

@@ -66,7 +66,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (forceRefresh) {
                 vmListUrl.searchParams.set("refresh", "1");
             }
-            fetch(vmListUrl.toString(), {
+            return fetch(vmListUrl.toString(), {
                 cache: "no-store",
                 headers: {"Accept": "application/json"}
             }).then(function (response) {
@@ -94,6 +94,50 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
 
+        function clearVmOperationFromUrl() {
+            var currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.delete("operation_id");
+            window.history.replaceState({}, "", currentUrl.toString());
+        }
+
+        function waitForVmOperation() {
+            var operationUrl = vmTableBody.dataset.vmOperationUrl;
+            if (!operationUrl) {
+                return;
+            }
+            fetch(operationUrl, {
+                cache: "no-store",
+                headers: {"Accept": "application/json"}
+            }).then(function (response) {
+                if (response.redirected) {
+                    window.location.assign(response.url);
+                    return null;
+                }
+                if (response.status === 404) {
+                    clearVmOperationFromUrl();
+                    return null;
+                }
+                if (!response.ok) {
+                    throw new Error("更换 IP 任务状态读取失败");
+                }
+                return response.json();
+            }).then(function (payload) {
+                if (!payload) {
+                    return;
+                }
+                if (!payload.finished) {
+                    window.setTimeout(waitForVmOperation, 1000);
+                    return;
+                }
+                clearVmOperationFromUrl();
+                if (payload.status === "成功") {
+                    loadVms(true);
+                }
+            }).catch(function () {
+                window.setTimeout(waitForVmOperation, 2000);
+            });
+        }
+
         vmRefresh.addEventListener("click", function () {
             loadVms(true);
         });
@@ -102,7 +146,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 loadVms(false);
             }
         });
-        loadVms(false);
+        loadVms(false).finally(waitForVmOperation);
     }
 
     var costContent = document.getElementById("cost-overview-content");
