@@ -94,6 +94,42 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
 
+        function copyVmPublicIp(target) {
+            var targetName = String(target || "").split("/").pop();
+            if (!targetName) {
+                return Promise.resolve();
+            }
+            var targetRow = Array.from(vmTableBody.querySelectorAll("[data-vm-name]")).find(function (row) {
+                return row.dataset.vmName === targetName;
+            });
+            var publicIp = targetRow ? targetRow.dataset.vmPublicIp : "";
+            if (!publicIp) {
+                return Promise.resolve();
+            }
+
+            function copyWithExecCommand() {
+                var copyInput = document.createElement("textarea");
+                copyInput.value = publicIp;
+                copyInput.setAttribute("readonly", "true");
+                copyInput.style.position = "fixed";
+                copyInput.style.opacity = "0";
+                document.body.appendChild(copyInput);
+                copyInput.select();
+                try {
+                    document.execCommand("copy");
+                } catch (error) {
+                    // 浏览器不允许无用户手势复制时，忽略剪贴板失败。
+                }
+                document.body.removeChild(copyInput);
+                return Promise.resolve();
+            }
+
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(publicIp).catch(copyWithExecCommand);
+            }
+            return copyWithExecCommand();
+        }
+
         function clearVmOperationFromUrl() {
             var currentUrl = new URL(window.location.href);
             currentUrl.searchParams.delete("operation_id");
@@ -131,7 +167,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
                 clearVmOperationFromUrl();
                 if (payload.status === "成功") {
-                    loadVms(true);
+                    loadVms(true).then(function () {
+                        return copyVmPublicIp(payload.target);
+                    });
                 }
             }).catch(function () {
                 window.setTimeout(waitForVmOperation, 2000);

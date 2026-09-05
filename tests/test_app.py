@@ -1228,6 +1228,10 @@ class AppTests(unittest.TestCase):
             "将删除 test-vm 及其关联的全部资源，且无法恢复。确定继续？",
             payload["html"],
         )
+        self.assertIn(
+            'data-vm-public-ip="203.0.113.10"',
+            payload["html"],
+        )
         self.assertNotIn("删除资源组", payload["html"])
 
     def test_change_ip_redirects_to_vm_list_with_operation_tracking(self):
@@ -1291,6 +1295,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(active_response.get_json(), {
             "status": "执行中",
             "finished": False,
+            "target": "test-rg/test-vm",
         })
 
         operation_log.status = "成功"
@@ -1302,6 +1307,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(completed_response.get_json(), {
             "status": "成功",
             "finished": True,
+            "target": "test-rg/test-vm",
         })
 
     def test_vm_operation_status_rejects_unrelated_operation(self):

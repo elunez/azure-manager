@@ -1,5 +1,5 @@
 {% for vm in vms %}
-<tr>
+<tr data-vm-name="{{ vm.name }}" data-vm-public-ip="{{ vm.public_ips[0] if vm.public_ips else '' }}">
     <td class="vm-name-column">
         <span class="vm-name" title="{{ vm.name }}">{{ vm.name }}</span>
     </td>

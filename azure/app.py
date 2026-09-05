@@ -1474,6 +1474,7 @@ def vm_operation_status(credential_id, operation_id):
     return jsonify(
         status=operation_log.status,
         finished=operation_log.status not in ACTIVE_TASK_STATUSES,
+        target=operation_log.target,
     )
 
 
