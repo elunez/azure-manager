@@ -1,6 +1,36 @@
 document.addEventListener("DOMContentLoaded", function () {
     "use strict";
 
+    function showAppToast(message, isWarning) {
+        var container = document.querySelector(".app-toast-container");
+        if (!container) {
+            container = document.createElement("div");
+            container.className = "toast-container position-fixed app-toast-container";
+            document.body.appendChild(container);
+        }
+
+        var element = document.createElement("div");
+        element.className = "toast app-toast" + (isWarning ? " app-toast-warning" : "");
+        element.setAttribute("role", "status");
+        element.setAttribute("aria-live", "polite");
+        element.setAttribute("aria-atomic", "true");
+        element.dataset.bsDelay = "4000";
+        element.innerHTML = [
+            '<div class="d-flex align-items-center gap-3">',
+            '<span class="app-toast-icon" aria-hidden="true"><i class="bi"></i></span>',
+            '<div class="toast-body flex-grow-1 p-0"></div>',
+            '<button type="button" class="btn-close app-toast-close" data-bs-dismiss="toast" aria-label="关闭"></button>',
+            "</div>"
+        ].join("");
+        element.querySelector(".bi").classList.add(isWarning ? "bi-exclamation-lg" : "bi-check-lg");
+        element.querySelector(".toast-body").textContent = message;
+        element.addEventListener("hidden.bs.toast", function () {
+            element.remove();
+        });
+        container.appendChild(element);
+        bootstrap.Toast.getOrCreateInstance(element).show();
+    }
+
     document.querySelectorAll(".app-toast").forEach(function (element) {
         bootstrap.Toast.getOrCreateInstance(element).show();
     });
@@ -87,8 +117,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 vmTableBody.innerHTML = payload.html;
                 vmTableBody.setAttribute("aria-busy", "false");
                 vmCount.textContent = payload.count + " 台";
+                return payload;
             }).catch(function (error) {
                 setVmError(error.message || "VM 列表加载失败，请稍后重试");
+                return null;
             }).finally(function () {
                 vmRefresh.disabled = false;
             });
@@ -97,14 +129,14 @@ document.addEventListener("DOMContentLoaded", function () {
         function copyVmPublicIp(target) {
             var targetName = String(target || "").split("/").pop();
             if (!targetName) {
-                return Promise.resolve();
+                return Promise.resolve(false);
             }
             var targetRow = Array.from(vmTableBody.querySelectorAll("[data-vm-name]")).find(function (row) {
                 return row.dataset.vmName === targetName;
             });
             var publicIp = targetRow ? targetRow.dataset.vmPublicIp : "";
             if (!publicIp) {
-                return Promise.resolve();
+                return Promise.resolve(false);
             }
 
             function copyWithExecCommand() {
@@ -115,17 +147,20 @@ document.addEventListener("DOMContentLoaded", function () {
                 copyInput.style.opacity = "0";
                 document.body.appendChild(copyInput);
                 copyInput.select();
+                var copied = false;
                 try {
-                    document.execCommand("copy");
+                    copied = document.execCommand("copy");
                 } catch (error) {
                     // 浏览器不允许无用户手势复制时，忽略剪贴板失败。
                 }
                 document.body.removeChild(copyInput);
-                return Promise.resolve();
+                return Promise.resolve(copied);
             }
 
             if (navigator.clipboard && window.isSecureContext) {
-                return navigator.clipboard.writeText(publicIp).catch(copyWithExecCommand);
+                return navigator.clipboard.writeText(publicIp).then(function () {
+                    return true;
+                }).catch(copyWithExecCommand);
             }
             return copyWithExecCommand();
         }
@@ -167,8 +202,18 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
                 clearVmOperationFromUrl();
                 if (payload.status === "成功") {
-                    loadVms(true).then(function () {
+                    loadVms(true).then(function (listPayload) {
+                        if (!listPayload) {
+                            return null;
+                        }
+                        showAppToast("更换 IP 完成，VM 列表已刷新");
                         return copyVmPublicIp(payload.target);
+                    }).then(function (copied) {
+                        if (copied === true) {
+                            showAppToast("新公网 IP 已复制到剪贴板");
+                        } else if (copied === false) {
+                            showAppToast("新公网 IP 自动复制失败，请手动复制", true);
+                        }
                     });
                 }
             }).catch(function () {

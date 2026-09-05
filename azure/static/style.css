@@ -1109,6 +1109,16 @@ body {
   border-radius: 50%;
 }
 
+.app-toast-warning {
+  border-color: #f3d5a0;
+  border-left-color: #f0ad4e;
+}
+
+.app-toast-warning .app-toast-icon {
+  color: #9a6200;
+  background: #fff4dc;
+}
+
 .app-toast .toast-body {
   font-size: 14px;
   line-height: 1.45;
