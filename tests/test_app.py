@@ -1228,10 +1228,7 @@ class AppTests(unittest.TestCase):
             "将删除 test-vm 及其关联的全部资源，且无法恢复。确定继续？",
             payload["html"],
         )
-        self.assertIn(
-            'data-vm-public-ip="203.0.113.10"',
-            payload["html"],
-        )
+        self.assertNotIn("data-vm-public-ip=", payload["html"])
         self.assertNotIn("删除资源组", payload["html"])
 
     def test_change_ip_redirects_to_vm_list_with_operation_tracking(self):

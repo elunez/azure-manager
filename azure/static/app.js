@@ -126,45 +126,6 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
 
-        function copyVmPublicIp(target) {
-            var targetName = String(target || "").split("/").pop();
-            if (!targetName) {
-                return Promise.resolve(false);
-            }
-            var targetRow = Array.from(vmTableBody.querySelectorAll("[data-vm-name]")).find(function (row) {
-                return row.dataset.vmName === targetName;
-            });
-            var publicIp = targetRow ? targetRow.dataset.vmPublicIp : "";
-            if (!publicIp) {
-                return Promise.resolve(false);
-            }
-
-            function copyWithExecCommand() {
-                var copyInput = document.createElement("textarea");
-                copyInput.value = publicIp;
-                copyInput.setAttribute("readonly", "true");
-                copyInput.style.position = "fixed";
-                copyInput.style.opacity = "0";
-                document.body.appendChild(copyInput);
-                copyInput.select();
-                var copied = false;
-                try {
-                    copied = document.execCommand("copy");
-                } catch (error) {
-                    // 浏览器不允许无用户手势复制时，忽略剪贴板失败。
-                }
-                document.body.removeChild(copyInput);
-                return Promise.resolve(copied);
-            }
-
-            if (navigator.clipboard && window.isSecureContext) {
-                return navigator.clipboard.writeText(publicIp).then(function () {
-                    return true;
-                }).catch(copyWithExecCommand);
-            }
-            return copyWithExecCommand();
-        }
-
         function clearVmOperationFromUrl() {
             var currentUrl = new URL(window.location.href);
             currentUrl.searchParams.delete("operation_id");
@@ -207,13 +168,6 @@ document.addEventListener("DOMContentLoaded", function () {
                             return null;
                         }
                         showAppToast("更换 IP 完成，VM 列表已刷新");
-                        return copyVmPublicIp(payload.target);
-                    }).then(function (copied) {
-                        if (copied === true) {
-                            showAppToast("新公网 IP 已复制到剪贴板");
-                        } else if (copied === false) {
-                            showAppToast("新公网 IP 自动复制失败，请手动复制", true);
-                        }
                     });
                 }
             }).catch(function () {
